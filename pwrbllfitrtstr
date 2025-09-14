@@ -1,7 +1,11 @@
 import pandas as pd, re, csv
 
+# === Config ===
+REVERSE_INPUT = True   # Set to True if pwrbll.txt is newest→oldest
+                      # Set to False if pwrbll.txt is oldest→newest
+
 # === Load dataset ===
-def load_draws(path="pwrbll.txt"):
+def load_draws(path="pwrbll.txt", reverse=False):
     with open(path) as f:
         lines = f.readlines()
     draws = []
@@ -9,9 +13,11 @@ def load_draws(path="pwrbll.txt"):
         nums = re.findall(r"\b\d{1,2}\b", line)
         if len(nums) >= 5:
             draws.append([int(x) for x in nums[:5]])
+    if reverse:
+        draws.reverse()   # flip to chronological order
     return pd.DataFrame(draws)
 
-df = load_draws("pwrbll.txt")
+df = load_draws("pwrbll.txt", reverse=REVERSE_INPUT)
 total_pairs = len(df) - 1
 
 # === Precompute variants ===
@@ -37,8 +43,9 @@ variants = precompute(df)
 def flatten_digits(nums):
     return [int(d) for n in nums for d in str(n)]
 
-# === Generic runner for multiple filters ===
-def run_filters(filters, out_path="filter_results.csv"):
+# === Runner for multiple filters ===
+def run_filters(filters, out_path="filter_results.csv", append=False):
+    mode = "a" if append else "w"
     results = []
     for name, seed_cond, combo_cond in filters:
         for variant in variants.columns:
@@ -54,28 +61,22 @@ def run_filters(filters, out_path="filter_results.csv"):
             stat = f"{elim}/{total_pairs}"
             results.append([name, variant, elim, total_pairs, stat])
     # Save
-    with open(out_path, "w", newline="") as f:
+    with open(out_path, mode, newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["filter_name", "variant", "eliminated", "total", "stat"])
+        if not append:  # write header only once
+            writer.writerow(["filter_name", "variant", "eliminated", "total", "stat"])
         writer.writerows(results)
-    print(f"Results saved to {out_path}")
+    print(f"Results {'appended to' if append else 'saved to'} {out_path}")
     return results
 
-# === Define filters here ===
+# === Example filters ===
 filters = [
-    # Example: If seed sum = 16 and combo is a triple
     (
         "Seed=16 & Combo=Triple",
         lambda seed_val, seed_digits: seed_val == 16,
         lambda combo_val, combo_digits: any(combo_digits.count(d) >= 3 for d in set(combo_digits))
-    ),
-    # Example: If seed sum = 7 and combo has more than 2 shared digits
-    (
-        "Seed=7 & Combo>=3 Shared Digits",
-        lambda seed_val, seed_digits: seed_val == 7,
-        lambda combo_val, combo_digits: len(set(seed_digits) & set(combo_digits)) > 2
     )
 ]
 
-# === Run them all ===
-results = run_filters(filters)
+# === Run ===
+results = run_filters(filters, "filter_results.csv", append=False)
