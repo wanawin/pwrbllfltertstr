@@ -1,4 +1,4 @@
-# pwrbll_filter_app.py  — Streamlit Powerball Filter Runner (variant → itself)
+# pwrbll_filter_app.py — Streamlit Powerball Filter Runner (variant → itself)
 from __future__ import annotations
 
 import re
@@ -12,8 +12,8 @@ import streamlit as st
 # =======================
 # Runtime / safety config
 # =======================
-REVERSE_THRESHOLD = 0.75          # mark as reversal candidate when ≥ 75% eliminated
-MAX_DETAILED_ROWS = 200_000       # hard cap to prevent OOM in Streamlit
+REVERSE_THRESHOLD = 0.75
+MAX_DETAILED_ROWS = 200_000
 
 # =======================
 # UI helper
@@ -34,8 +34,7 @@ def load_draws_from_text(text: str, reverse_input: bool = False) -> List[List[in
     """
     Parse lines like:
       Sat, Aug 30, 2025   03-18-22-27-33,   Powerball: 17
-    Return [[3,18,22,27,33], ...]
-    Works with dashes/commas/spaces; ignores trailing 'Powerball: xx'.
+    → [[3,18,22,27,33], ...]
     """
     draws: List[List[int]] = []
     pat = re.compile(r'(?<!\d)(\d{1,2})\D+(\d{1,2})\D+(\d{1,2})\D+(\d{1,2})\D+(\d{1,2})(?!\d)')
@@ -44,7 +43,7 @@ def load_draws_from_text(text: str, reverse_input: bool = False) -> List[List[in
         if m:
             draws.append([int(g) for g in m.groups()])
     if reverse_input:
-        draws.reverse()  # newest→oldest -> chronological
+        draws.reverse()
     return draws
 
 # =======================
@@ -53,26 +52,25 @@ def load_draws_from_text(text: str, reverse_input: bool = False) -> List[List[in
 def five_positions(draw: List[int]) -> List[int]:
     return list(draw)
 
-def ones_digits(draw: List[int]) -> List[int]:
+def ones_digits_list(draw: List[int]) -> List[int]:
     return [n % 10 for n in draw]
 
-def tens_digits(draw: List[int]) -> List[int]:
+def tens_digits_list(draw: List[int]) -> List[int]:
     return [n // 10 for n in draw]
 
 def pos_digit_sums(draw: List[int]) -> List[int]:
     return [(n // 10) + (n % 10) for n in draw]
 
 def full_sum(draw: List[int]) -> int:
-    # Sum of the 5 two-digit numbers (not digit-sum of all digits)
     return sum(draw)
 
 def variant_value(draw: List[int], variant: str) -> Any:
     if variant == "full":
         return full_sum(draw)
     if variant == "ones":
-        return sum(ones_digits(draw))
+        return sum(ones_digits_list(draw))
     if variant == "tens":
-        return sum(tens_digits(draw))
+        return sum(tens_digits_list(draw))
     if variant.startswith("possum"):
         idx = int(variant[-1]) - 1
         return pos_digit_sums(draw)[idx]
@@ -91,10 +89,10 @@ def atoms_for_hotcold(window_draws: List[List[int]], variant: str) -> List[int]:
     atoms: List[int] = []
     if variant == "ones":
         for d in window_draws:
-            atoms.extend(ones_digits(d))
+            atoms.extend(ones_digits_list(d))
     elif variant == "tens":
         for d in window_draws:
-            atoms.extend(tens_digits(d))
+            atoms.extend(tens_digits_list(d))
     elif variant.startswith("possum"):
         j = int(variant[-1]) - 1
         for d in window_draws:
@@ -104,7 +102,7 @@ def atoms_for_hotcold(window_draws: List[List[int]], variant: str) -> List[int]:
         for d in window_draws:
             n = five_positions(d)[j]
             atoms.extend([n // 10, n % 10])
-    else:  # full
+    else:
         for d in window_draws:
             for n in d:
                 atoms.extend([n // 10, n % 10])
@@ -163,13 +161,14 @@ def shared_digits_count(seed_draw, win_draw) -> int:
         w.extend([n // 10, n % 10])
     return len(set(s) & set(w))
 
+# Give eval only what we allow:
 ALLOWED_GLOBALS = {
     "spread": spread_value,
     "unique_digits": unique_digits_count,
     "is_triple": is_triple_draw,
     "shared_digits": shared_digits_count,
     "min": min, "max": max, "abs": abs, "sum": sum, "len": len,
-    "set": set, "any": any, "all": all, "sorted": sorted,
+    "set": set, "any": any, "all": all, "sorted": sorted, "range": range,
 }
 
 def layman_explanation(expr: str) -> str:
@@ -187,7 +186,7 @@ def layman_explanation(expr: str) -> str:
 # Legacy token normalization
 # =======================
 LEGACY_MAP = [
-    # common legacy names → runner names
+    # names → runner names
     (r"\bcombo_sum\b", "winner"),
     (r"\bcombo_total\b", "winner"),
     (r"\bcombo\b", "winner"),
@@ -196,7 +195,7 @@ LEGACY_MAP = [
     (r"\bones_total\b", "winner"),
     (r"\btens_total\b", "winner"),
     (r"\bfull_combo\b", "winner"),
-    # boolean ops and punctuation
+    # boolean ops & punctuation
     (r"\b&\b", " and "),
     (r"\b\|\b", " or "),
     (r"“|”|‘|’", "\""),
@@ -295,6 +294,7 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
             eliminated = tested = 0
             status = "OK"
             explanation = layman_explanation(expr) if expr else "Unparseable"
+            last_error = ""
 
             for i in range(1, len(draws)):
                 seed_draw, win_draw = draws[i - 1], draws[i]
@@ -302,18 +302,35 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                 hot, cold, due      = compute_hot_cold_due(draws, i, v, hot_cold_window, due_window)
 
                 # Base context for expressions
-                ctx = {
+                ctx: Dict[str, Any] = {
                     "seed": seed_val, "winner": win_val,
                     "hot": hot, "cold": cold, "due": due,
                     "seed_draw": seed_draw, "winner_draw": win_draw,
                     "variant_name": v,
                 }
 
-                # ---- Legacy-friendly aliases (so Batch CSVs run without editing) ----
-                alias: Dict[str, Any] = {}
+                # ---- Legacy-friendly aliases / lists / spreads ----
+                # lists of digits (winner & seed)
+                winner_ones = ones_digits_list(win_draw)
+                winner_tens = tens_digits_list(win_draw)
+                seed_ones   = ones_digits_list(seed_draw)
+                seed_tens   = tens_digits_list(seed_draw)
 
-                # full / ones / tens totals
-                alias.update({
+                ctx.update({
+                    "ones_digits": winner_ones,          # legacy expressions expect this name
+                    "tens_digits": winner_tens,
+                    "seed_ones_digits": seed_ones,
+                    "seed_tens_digits": seed_tens,
+                    "sum_ones": sum(winner_ones),
+                    "sum_tens": sum(winner_tens),
+                    "seed_sum_ones": sum(seed_ones),
+                    "seed_sum_tens": sum(seed_tens),
+                    "seed_spread": spread_value(seed_draw),
+                    "combo_spread": spread_value(win_draw),
+                })
+
+                # full / ones / tens totals (aliases)
+                ctx.update({
                     "seed_full":               variant_value(seed_draw, "full"),
                     "winner_full":             variant_value(win_draw,  "full"),
                     "seed_ones_total":         variant_value(seed_draw, "ones"),
@@ -326,42 +343,58 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                     "combo_tens_total":        variant_value(win_draw,  "tens"),
                 })
 
-                # positional numbers and digit-sums (pos1..pos5, possum1..possum5)
+                # positional numbers / tens / ones / digit-sums
                 for j in range(1, 6):
-                    alias[f"seed_pos{j}_number"]     = variant_value(seed_draw, f"pos{j}")
-                    alias[f"winner_pos{j}_number"]   = variant_value(win_draw,  f"pos{j}")
-                    alias[f"seed_pos{j}_digitsum"]   = variant_value(seed_draw, f"possum{j}")
-                    alias[f"winner_pos{j}_digitsum"] = variant_value(win_draw,  f"possum{j}")
-                    # common legacy short names (default to winner side)
-                    alias[f"pos{j}_number"]   = alias[f"winner_pos{j}_number"]
-                    alias[f"pos{j}_digitsum"] = alias[f"winner_pos{j}_digitsum"]
+                    wnum = variant_value(win_draw,  f"pos{j}")
+                    snum = variant_value(seed_draw, f"pos{j}")
+                    wt, wo = (wnum // 10), (wnum % 10)
+                    st, so = (snum // 10), (snum % 10)
+                    wds = wt + wo
+                    sds = st + so
 
-                # expose exact legacy spellings used in some files
-                alias.update({
-                    "pos1_number": alias["winner_pos1_number"],
-                    "pos2_number": alias["winner_pos2_number"],
-                    "pos3_number": alias["winner_pos3_number"],
-                    "pos4_number": alias["winner_pos4_number"],
-                    "pos5_number": alias["winner_pos5_number"],
-                    "pos1_digitsum": alias["winner_pos1_digitsum"],
-                    "pos2_digitsum": alias["winner_pos2_digitsum"],
-                    "pos3_digitsum": alias["winner_pos3_digitsum"],
-                    "pos4_digitsum": alias["winner_pos4_digitsum"],
-                    "pos5_digitsum": alias["winner_pos5_digitsum"],
+                    ctx[f"winner_pos{j}_number"] = wnum
+                    ctx[f"seed_pos{j}_number"]   = snum
+
+                    ctx[f"winner_pos{j}_tens"]   = wt
+                    ctx[f"winner_pos{j}_ones"]   = wo
+                    ctx[f"seed_pos{j}_tens"]     = st
+                    ctx[f"seed_pos{j}_ones"]     = so
+
+                    ctx[f"winner_pos{j}_digitsum"] = wds
+                    ctx[f"seed_pos{j}_digitsum"]   = sds
+
+                    # common short legacy names (default to winner)
+                    ctx[f"pos{j}_number"]   = wnum
+                    ctx[f"pos{j}_tens"]     = wt
+                    ctx[f"pos{j}_ones"]     = wo
+                    ctx[f"pos{j}_digitsum"] = wds
+
+                # expose exact legacy spellings
+                ctx.update({
+                    "pos1_number": ctx["winner_pos1_number"],
+                    "pos2_number": ctx["winner_pos2_number"],
+                    "pos3_number": ctx["winner_pos3_number"],
+                    "pos4_number": ctx["winner_pos4_number"],
+                    "pos5_number": ctx["winner_pos5_number"],
+                    "pos1_digitsum": ctx["winner_pos1_digitsum"],
+                    "pos2_digitsum": ctx["winner_pos2_digitsum"],
+                    "pos3_digitsum": ctx["winner_pos3_digitsum"],
+                    "pos4_digitsum": ctx["winner_pos4_digitsum"],
+                    "pos5_digitsum": ctx["winner_pos5_digitsum"],
                 })
-
-                ctx.update(alias)
                 # ---- end aliases ----
 
                 keep = True
                 if not expr:
                     status = "FLAGGED"
+                    last_error = "empty/normalized-away expression"
                 else:
                     try:
                         # Convention: expression True => eliminate
                         keep = not bool(eval(expr, ALLOWED_GLOBALS, ctx))
-                    except Exception:
+                    except Exception as ex:
                         status = "FLAGGED"
+                        last_error = f"{type(ex).__name__}: {ex}"
                         keep = True
 
                 eliminated += (0 if keep else 1)
@@ -374,6 +407,7 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                         "seed_draw": seed_draw, "winner_draw": win_draw,
                         "hot_digits": hot, "cold_digits": cold, "due_digits": due,
                         "eliminated": (not keep), "status": status,
+                        "error": last_error,
                         "layman_explanation": explanation
                     })
 
@@ -386,7 +420,8 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
             if status == "FLAGGED":
                 flagged_rows.append({
                     "filter_id": fid, "variant": v, "stat": stat,
-                    "expression": expr, "layman_explanation": explanation
+                    "expression": expr, "error": last_error,
+                    "layman_explanation": explanation
                 })
             if tested > 0 and (eliminated / tested) >= REVERSE_THRESHOLD:
                 reverse_rows.append({
@@ -405,8 +440,8 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
 # =======================
 # Streamlit UI
 # =======================
-st.set_page_config(page_title="Filter Runner", layout="wide")
-st.title("🎰 Filter Runner (variant → itself)")
+st.set_page_config(page_title="Powerball Filter Runner", layout="wide")
+st.title("🎰 Powerball Filter Runner (variant → itself)")
 
 with st.sidebar:
     st.header("Settings")
@@ -460,7 +495,7 @@ if run_btn:
         st.dataframe(summary_df, use_container_width=True, height=400)
         download_pair(summary_df, "filter_results")
 
-        st.subheader("Flagged Filters (need rewrite)")
+        st.subheader("Flagged Filters (with error messages)")
         st.dataframe(flagged_df, use_container_width=True, height=260)
         download_pair(flagged_df, "flagged_filters")
 
