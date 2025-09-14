@@ -1,0 +1,81 @@
+import pandas as pd, re, csv
+
+# === Load dataset ===
+def load_draws(path="pwrbll.txt"):
+    with open(path) as f:
+        lines = f.readlines()
+    draws = []
+    for line in lines:
+        nums = re.findall(r"\b\d{1,2}\b", line)
+        if len(nums) >= 5:
+            draws.append([int(x) for x in nums[:5]])
+    return pd.DataFrame(draws)
+
+df = load_draws("pwrbll.txt")
+total_pairs = len(df) - 1
+
+# === Precompute variants ===
+def precompute(df):
+    pre = {}
+    # Full combo sum of digits
+    pre["full"] = [sum(int(d) for n in row for d in str(n)) for row in df.values]
+    # 1’s place
+    pre["ones"] = [sum(int(n) % 10 for n in row) for row in df.values]
+    # 10’s place
+    pre["tens"] = [sum(int(n) // 10 for n in row) for row in df.values]
+    # Positional numbers
+    for pos in range(5):
+        pre[f"pos{pos+1}_num"] = [int(row[pos]) for row in df.values]
+    # Positional digit sums
+    for pos in range(5):
+        pre[f"pos{pos+1}_sum"] = [sum(int(d) for d in str(row[pos])) for row in df.values]
+    return pd.DataFrame(pre)
+
+variants = precompute(df)
+
+# === Helper: flatten digits for triple/repeat checks ===
+def flatten_digits(nums):
+    return [int(d) for n in nums for d in str(n)]
+
+# === Generic runner for multiple filters ===
+def run_filters(filters, out_path="filter_results.csv"):
+    results = []
+    for name, seed_cond, combo_cond in filters:
+        for variant in variants.columns:
+            elim = 0
+            for i in range(1, len(df)):
+                seed_val = variants[variant].iloc[i-1]
+                combo_val = variants[variant].iloc[i]
+                seed_digits = flatten_digits(df.iloc[i-1])
+                combo_digits = flatten_digits(df.iloc[i])
+                if seed_cond(seed_val, seed_digits):
+                    if combo_cond(combo_val, combo_digits):
+                        elim += 1
+            stat = f"{elim}/{total_pairs}"
+            results.append([name, variant, elim, total_pairs, stat])
+    # Save
+    with open(out_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["filter_name", "variant", "eliminated", "total", "stat"])
+        writer.writerows(results)
+    print(f"Results saved to {out_path}")
+    return results
+
+# === Define filters here ===
+filters = [
+    # Example: If seed sum = 16 and combo is a triple
+    (
+        "Seed=16 & Combo=Triple",
+        lambda seed_val, seed_digits: seed_val == 16,
+        lambda combo_val, combo_digits: any(combo_digits.count(d) >= 3 for d in set(combo_digits))
+    ),
+    # Example: If seed sum = 7 and combo has more than 2 shared digits
+    (
+        "Seed=7 & Combo>=3 Shared Digits",
+        lambda seed_val, seed_digits: seed_val == 7,
+        lambda combo_val, combo_digits: len(set(seed_digits) & set(combo_digits)) > 2
+    )
+]
+
+# === Run them all ===
+results = run_filters(filters)
