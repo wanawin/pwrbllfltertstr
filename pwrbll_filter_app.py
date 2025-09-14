@@ -1,4 +1,4 @@
-# pwrbll_filter_app.py — Streamlit Powerball Filter Runner (variant → itself)
+# pwrbll_filter_app.py — Streamlit Filter Runner (variant → itself)
 from __future__ import annotations
 
 import re
@@ -440,8 +440,8 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
 # =======================
 # Streamlit UI
 # =======================
-st.set_page_config(page_title="Powerball Filter Runner", layout="wide")
-st.title("🎰 Powerball Filter Runner (variant → itself)")
+st.set_page_config(page_title=" Filter Runner", layout="wide")
+st.title("🎰 Filter Runner (variant → itself)")
 
 with st.sidebar:
     st.header("Settings")
