@@ -1,182 +1,118 @@
 import pandas as pd
-from collections import Counter
+import os
 
-# ============================================================
-# 🔧 Adjustable Parameters
-# ============================================================
-HOT_COLD_WINDOW = 6   # last N draws for hot/cold calculation
-DUE_WINDOW = 2        # last N draws for due calculation
+# ========================
+# Adjustable Parameters
+# ========================
+HOT_LOOKBACK = 6   # last N draws for hot/cold
+DUE_LOOKBACK = 2   # last N draws for due
 INPUT_FILE = "pwrbll.txt"
-FILTER_FILE = "test 4pwrballfilters.txt"
 
-OUT_FULL = "filter_results"
-OUT_FLAGGED = "flagged_filters"
-OUT_REVERSAL = "reversal_candidates"
-
-# ============================================================
-# 🔹 Helpers
-# ============================================================
-def load_draws(path):
+# ========================
+# Load Draws
+# ========================
+def load_draws(filename):
     draws = []
-    with open(path) as f:
+    with open(filename) as f:
         for line in f:
             parts = line.strip().split()
-            if len(parts) >= 5:
-                draws.append([int(x) for x in parts[:5]])
+            # Find the "03-18-22-27-33" block
+            for token in parts:
+                if "-" in token and token.count("-") == 4:
+                    nums = [int(x) for x in token.split("-")]
+                    draws.append(nums)
+                    break
     return draws
 
-def compute_hot_cold_due(history, idx):
-    start = max(0, idx - HOT_COLD_WINDOW)
-    window = history[start:idx]
-    flat = [d for draw in window for d in draw]
+# ========================
+# Helpers
+# ========================
+def digit_sum(nums):
+    return sum(nums)
 
-    counts = Counter(flat)
-    if not counts:
-        return [], [], []
+def unique_digits(nums):
+    return len(set(nums))
 
-    max_freq = max(counts.values())
-    min_freq = min(counts.values())
-    hot = [d for d, c in counts.items() if c == max_freq]
-    cold = [d for d, c in counts.items() if c == min_freq]
+def spread(nums):
+    return max(nums) - min(nums)
 
-    recent = set([d for draw in history[max(0, idx-DUE_WINDOW):idx] for d in draw])
-    all_digits = set(range(10))
-    due = list(all_digits - recent)
+def is_triple(nums):
+    return any(nums.count(x) == 3 for x in set(nums))
+
+def hot_cold_due(draws, lookback=HOT_LOOKBACK, due_back=DUE_LOOKBACK):
+    """Return hot, cold, due digits based on last N draws."""
+    flat = [n for draw in draws[-lookback:] for n in draw]
+    freq = pd.Series(flat).value_counts()
+
+    hot = list(freq.nlargest(3).index)
+    cold = list(freq.nsmallest(3).index)
+
+    recent = set(n for draw in draws[-due_back:] for n in draw)
+    all_nums = set(range(1, 70))  # Powerball pool max
+    due = list(all_nums - recent)
 
     return hot, cold, due
 
-def variant_sums(draw):
-    ones = [d % 10 for d in draw]
-    tens = [d // 10 for d in draw]
-    pos_nums = draw
-    pos_sums = [t + o for t, o in zip(tens, ones)]
-    return {
-        "full": sum(draw),
-        "ones": sum(ones),
-        "tens": sum(tens),
-        "pos": pos_nums,
-        "possum": pos_sums
-    }
+# ========================
+# Apply Filters
+# ========================
+def apply_filter(filter_expr, seed, combo, hot, cold, due):
+    """Interpret filter expressions dynamically."""
+    # Replace keywords with function calls
+    expr = filter_expr
+    expr = expr.replace("combo sum", str(digit_sum(combo)))
+    expr = expr.replace("seed sum", str(digit_sum(seed)))
+    expr = expr.replace("combo spread", str(spread(combo)))
+    expr = expr.replace("combo unique", str(unique_digits(combo)))
+    expr = expr.replace("is triple", str(is_triple(combo)))
+    expr = expr.replace("hot", str(hot))
+    expr = expr.replace("cold", str(cold))
+    expr = expr.replace("due", str(due))
+    expr = expr.replace("combo", str(combo))
+    expr = expr.replace("seed", str(seed))
 
-def layman_explanation(expr: str) -> str:
-    """Turn filter expression into a human-readable explanation."""
-    repl = {
-        "seed": "seed sum",
-        "winner": "winner sum",
-        "==": "equals",
-        "<=": "is less than or equal to",
-        ">=": "is greater than or equal to",
-        "<": "is less than",
-        ">": "is greater than",
-        " and ": " AND ",
-        " or ": " OR "
-    }
-    result = expr
-    for k, v in repl.items():
-        result = result.replace(k, v)
-    return f"Eliminate if {result}"
+    try:
+        return eval(expr)
+    except Exception as e:
+        return f"ERROR: {e}"
 
-# ============================================================
-# 🔹 Core Evaluation
-# ============================================================
-def evaluate_filters(draws, filters):
-    results = []
-    for i in range(1, len(draws)):
-        seed = draws[i-1]
-        winner = draws[i]
-
-        seed_vars = variant_sums(seed)
-        win_vars = variant_sums(winner)
-
-        hot, cold, due = compute_hot_cold_due(draws, i)
-
-        for f in filters:
-            fid, expr = f["id"], f["expr"]
-            explanation = layman_explanation(expr)
-
-            for variant in ["full", "ones", "tens"]:
-                try:
-                    s_val, w_val = seed_vars[variant], win_vars[variant]
-                    keep = eval(expr, {}, {"seed": s_val, "winner": w_val})
-                    status = "OK"
-                except Exception:
-                    keep = True
-                    status = "FLAGGED"
-
-                results.append({
-                    "filter_id": fid,
-                    "variant": variant,
-                    "eliminated": not keep,
-                    "hot_digits": hot,
-                    "cold_digits": cold,
-                    "due_digits": due,
-                    "status": status,
-                    "layman_explanation": explanation
-                })
-
-            for j in range(5):
-                for label, key in [(f"pos{j+1}", "pos"), (f"possum{j+1}", "possum")]:
-                    try:
-                        s_val, w_val = seed_vars[key][j], win_vars[key][j]
-                        keep = eval(expr, {}, {"seed": s_val, "winner": w_val})
-                        status = "OK"
-                    except Exception:
-                        keep = True
-                        status = "FLAGGED"
-
-                    results.append({
-                        "filter_id": fid,
-                        "variant": label,
-                        "eliminated": not keep,
-                        "hot_digits": hot,
-                        "cold_digits": cold,
-                        "due_digits": due,
-                        "status": status,
-                        "layman_explanation": explanation
-                    })
-    return pd.DataFrame(results)
-
-# ============================================================
-# 🔹 Save Helper
-# ============================================================
-def save_both(df, base):
-    csv_path = f"{base}.csv"
-    txt_path = f"{base}.txt"
-    df.to_csv(csv_path, index=False)
-    df.to_csv(txt_path, index=False, sep="\t")
-    print(f"Saved {csv_path} and {txt_path}")
-
-# ============================================================
-# 🔹 Main
-# ============================================================
+# ========================
+# Main
+# ========================
 def main():
     draws = load_draws(INPUT_FILE)
+    results = []
 
-    filters = []
-    with open(FILTER_FILE) as f:
-        for line in f:
-            parts = line.strip().split(",", 1)
-            if len(parts) == 2:
-                filters.append({"id": parts[0], "expr": parts[1]})
+    # Example filter list — replace with your uploaded filters
+    filters = [
+        "digit_sum(combo) < 10 and len(set(combo) & set(seed)) >= 3",
+        "digit_sum(combo) > 35",
+        "is_triple(combo)"
+    ]
 
-    df = evaluate_filters(draws, filters)
+    for i in range(1, len(draws)):
+        seed = draws[i - 1]
+        combo = draws[i]
+        hot, cold, due = hot_cold_due(draws[:i])
 
-    # Save full results
-    save_both(df, OUT_FULL)
+        for f in filters:
+            outcome = apply_filter(f, seed, combo, hot, cold, due)
+            results.append({
+                "Seed": seed,
+                "Combo": combo,
+                "Filter": f,
+                "Outcome": outcome
+            })
 
-    # Flagged
-    flagged = df[df["status"] == "FLAGGED"].drop_duplicates(["filter_id","variant"])
-    save_both(flagged, OUT_FLAGGED)
+    df = pd.DataFrame(results)
 
-    # Reversal candidates (≥75%)
-    summary = (
-        df.groupby(["filter_id", "variant", "status", "layman_explanation"])
-          .eliminated.agg(["sum","count"])
-          .reset_index()
-    )
-    summary["pct_eliminated"] = summary["sum"] / summary["count"]
-    reversal = summary[summary["pct_eliminated"] >= 0.75]
-    save_both(reversal, OUT_REVERSAL)
+    # Save CSV + TXT
+    df.to_csv("filter_results.csv", index=False)
+    with open("filter_results.txt", "w") as f:
+        for _, row in df.iterrows():
+            f.write(f"Seed: {row['Seed']} | Combo: {row['Combo']} | Filter: {row['Filter']} | Outcome: {row['Outcome']}\n")
+
+    print("✅ Results saved to filter_results.csv and filter_results.txt")
 
 if __name__ == "__main__":
     main()
