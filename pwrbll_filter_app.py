@@ -1,4 +1,5 @@
-# pwrbll_filter_app.py — Streamlit Filter Runner (variant → itself)
+# pwrbll_filter_app.py — Streamlit Powerball Filter Runner (variant → itself)
+
 from __future__ import annotations
 
 import re
@@ -49,81 +50,60 @@ def load_draws_from_text(text: str, reverse_input: bool = False) -> List[List[in
 # =======================
 # Variants (13)
 # =======================
-def five_positions(draw: List[int]) -> List[int]:
-    return list(draw)
-
-def ones_digits_list(draw: List[int]) -> List[int]:
-    return [n % 10 for n in draw]
-
-def tens_digits_list(draw: List[int]) -> List[int]:
-    return [n // 10 for n in draw]
-
-def pos_digit_sums(draw: List[int]) -> List[int]:
-    return [(n // 10) + (n % 10) for n in draw]
-
-def full_sum(draw: List[int]) -> int:
-    return sum(draw)
+def five_positions(draw: List[int]) -> List[int]: return list(draw)
+def ones_digits_list(draw: List[int]) -> List[int]: return [n % 10 for n in draw]
+def tens_digits_list(draw: List[int]) -> List[int]: return [n // 10 for n in draw]
+def pos_digit_sums(draw: List[int]) -> List[int]: return [(n // 10) + (n % 10) for n in draw]
+def full_sum(draw: List[int]) -> int: return sum(draw)
 
 def variant_value(draw: List[int], variant: str) -> Any:
-    if variant == "full":
-        return full_sum(draw)
-    if variant == "ones":
-        return sum(ones_digits_list(draw))
-    if variant == "tens":
-        return sum(tens_digits_list(draw))
-    if variant.startswith("possum"):
-        idx = int(variant[-1]) - 1
-        return pos_digit_sums(draw)[idx]
-    if variant.startswith("pos"):
-        idx = int(variant[-1]) - 1
-        return five_positions(draw)[idx]
+    if variant == "full": return full_sum(draw)
+    if variant == "ones": return sum(ones_digits_list(draw))
+    if variant == "tens": return sum(tens_digits_list(draw))
+    if variant.startswith("possum"): return pos_digit_sums(draw)[int(variant[-1]) - 1]
+    if variant.startswith("pos"):    return five_positions(draw)[int(variant[-1]) - 1]
     raise ValueError(f"Unknown variant {variant}")
 
 def all_variants() -> List[str]:
-    return ["full", "ones", "tens"] + [f"pos{i}" for i in range(1, 6)] + [f"possum{i}" for i in range(1, 6)]
+    return ["full","ones","tens"] + [f"pos{i}" for i in range(1,6)] + [f"possum{i}" for i in range(1,6)]
 
 # =======================
 # Hot / Cold / Due (variant-aware)
 # =======================
 def atoms_for_hotcold(window_draws: List[List[int]], variant: str) -> List[int]:
-    atoms: List[int] = []
+    a: List[int] = []
     if variant == "ones":
-        for d in window_draws:
-            atoms.extend(ones_digits_list(d))
+        for d in window_draws: a.extend(ones_digits_list(d))
     elif variant == "tens":
-        for d in window_draws:
-            atoms.extend(tens_digits_list(d))
+        for d in window_draws: a.extend(tens_digits_list(d))
     elif variant.startswith("possum"):
-        j = int(variant[-1]) - 1
-        for d in window_draws:
-            atoms.append(pos_digit_sums(d)[j])
+        j = int(variant[-1])-1
+        for d in window_draws: a.append(pos_digit_sums(d)[j])
     elif variant.startswith("pos"):
-        j = int(variant[-1]) - 1
+        j = int(variant[-1])-1
         for d in window_draws:
             n = five_positions(d)[j]
-            atoms.extend([n // 10, n % 10])
+            a.extend([n//10, n%10])
     else:
         for d in window_draws:
-            for n in d:
-                atoms.extend([n // 10, n % 10])
-    return atoms
+            for n in d: a.extend([n//10, n%10])
+    return a
 
 def compute_hot_cold_due(history: List[List[int]], idx: int, variant: str,
-                         hot_cold_window: int, due_window: int):
-    start = max(0, idx - hot_cold_window)
+                         hc_win: int, due_win: int):
+    start = max(0, idx - hc_win)
     window = history[start:idx]
     cnt = Counter(atoms_for_hotcold(window, variant))
     if cnt:
         maxf, minf = max(cnt.values()), min(cnt.values())
-        hot  = sorted([k for k, c in cnt.items() if c == maxf])
-        cold = sorted([k for k, c in cnt.items() if c == minf])
+        hot  = sorted([k for k,c in cnt.items() if c == maxf])
+        cold = sorted([k for k,c in cnt.items() if c == minf])
     else:
         hot, cold = [], []
-    recent = history[max(0, idx - due_window):idx]
-    rdig = []
+    recent = history[max(0, idx - due_win):idx]
+    rdig: List[int] = []
     for d in recent:
-        for n in d:
-            rdig.extend([n // 10, n % 10])
+        for n in d: rdig.extend([n//10, n%10])
     due = sorted(list(set(range(10)) - set(rdig)))
     return hot, cold, due
 
@@ -131,35 +111,29 @@ def compute_hot_cold_due(history: List[List[int]], idx: int, variant: str,
 # Helpers available in expressions
 # =======================
 def spread_value(v) -> int:
-    return (max(v) - min(v)) if isinstance(v, (list, tuple)) and len(v) == 5 else 0
+    return (max(v) - min(v)) if isinstance(v,(list,tuple)) and len(v)==5 else 0
 
 def unique_digits_count(v) -> int:
     digits = []
-    if isinstance(v, (list, tuple)):
-        for n in v:
-            digits.extend([n // 10, n % 10])
+    if isinstance(v,(list,tuple)):
+        for n in v: digits.extend([n//10,n%10])
     else:
-        for ch in str(int(v)):
-            digits.append(int(ch))
+        for ch in str(int(v)): digits.append(int(ch))
     return len(set(digits))
 
 def is_triple_draw(v) -> bool:
     digits = []
-    if isinstance(v, (list, tuple)):
-        for n in v:
-            digits.extend([n // 10, n % 10])
+    if isinstance(v,(list,tuple)):
+        for n in v: digits.extend([n//10,n%10])
     else:
-        for ch in str(int(v)):
-            digits.append(int(ch))
-    return any(c >= 3 for c in Counter(digits).values())
+        for ch in str(int(v)): digits.append(int(ch))
+    return any(c>=3 for c in Counter(digits).values())
 
 def shared_digits_count(seed_draw, win_draw) -> int:
-    s, w = [], []
-    for n in seed_draw:
-        s.extend([n // 10, n % 10])
-    for n in win_draw:
-        w.extend([n // 10, n % 10])
-    return len(set(s) & set(w))
+    s,w=[],[]
+    for n in seed_draw: s.extend([n//10,n%10])
+    for n in win_draw:  w.extend([n//10,n%10])
+    return len(set(s)&set(w))
 
 # Give eval only what we allow:
 ALLOWED_GLOBALS = {
@@ -169,279 +143,251 @@ ALLOWED_GLOBALS = {
     "shared_digits": shared_digits_count,
     "min": min, "max": max, "abs": abs, "sum": sum, "len": len,
     "set": set, "any": any, "all": all, "sorted": sorted, "range": range,
+    "Counter": Counter,
 }
 
 def layman_explanation(expr: str) -> str:
-    repl = {
-        "seed": "seed value", "winner": "winner value",
-        "==": "equals", "<=": "is ≤", ">=": "is ≥", "<": "is <", ">": "is >",
-        " and ": " AND ", " or ": " OR "
-    }
+    if not expr: return "Unparseable / constant"
+    repl = {"seed":"seed value","winner":"winner value","==":"equals","<=":"is ≤",">=":"is ≥","<":"is <",">":"is >", " and ":" AND "," or ":" OR "}
     text = expr
-    for k, v in repl.items():
-        text = text.replace(k, v)
+    for k,v in repl.items(): text = text.replace(k,v)
     return f"Eliminate if {text}"
 
 # =======================
 # Legacy token normalization
 # =======================
 LEGACY_MAP = [
-    # names → runner names
-    (r"\bcombo_sum\b", "winner"),
-    (r"\bcombo_total\b", "winner"),
-    (r"\bcombo\b", "winner"),
-    (r"\bseed_sum\b", "seed"),
-    (r"\bseed_total\b", "seed"),
-    (r"\bones_total\b", "winner"),
-    (r"\btens_total\b", "winner"),
-    (r"\bfull_combo\b", "winner"),
-    # boolean ops & punctuation
-    (r"\b&\b", " and "),
-    (r"\b\|\b", " or "),
-    (r"“|”|‘|’", "\""),
-    (r"≤", "<="),
-    (r"≥", ">="),
-    (r"≠", "!="),
-    (r"–", "-"),
+    (r"\bcombo_sum\b","winner"), (r"\bcombo_total\b","winner"), (r"\bcombo\b","winner"),
+    (r"\bseed_sum\b","seed"), (r"\bseed_total\b","seed"),
+    (r"\bones_total\b","winner"), (r"\btens_total\b","winner"),
+    (r"\bfull_combo\b","winner"),
+    (r"\b&\b"," and "), (r"\b\|\b"," or "),
+    (r"“|”|‘|’","\""), (r"≤","<="),(r"≥",">="),(r"≠","!="),(r"–","-"),
 ]
 
+BOOLEAN_LITERALS = {"true","false","1","0","yes","no"}
+
+def is_boolean_literal(s: str) -> bool:
+    return s.strip().lower() in BOOLEAN_LITERALS
+
 def normalize_expression(expr: str) -> str:
-    if not isinstance(expr, str):
-        return ""
+    if not isinstance(expr,str): return ""
     e = expr.strip()
-    if not e:
-        return ""
+    if not e: return ""
     e = e.strip("\"'")
-    if "see prior" in e.lower() or "see conversation" in e.lower():
-        return ""
-    for pat, repl in LEGACY_MAP:
-        e = re.sub(pat, repl, e, flags=re.IGNORECASE)
-    e = re.sub(r"\bAND\b", "and", e)
-    e = re.sub(r"\bOR\b",  "or",  e)
+    if "see prior" in e.lower() or "see conversation" in e.lower(): return ""
+    for pat,repl in LEGACY_MAP: e = re.sub(pat, repl, e, flags=re.IGNORECASE)
+    e = re.sub(r"\bAND\b","and",e); e = re.sub(r"\bOR\b","or",e)
+    if is_boolean_literal(e): return ""  # guard: don't execute constants
     return e
 
-def load_filters_any(text: str) -> List[Tuple[str, str]]:
+def load_filters_any(text: str) -> List[Tuple[str,str]]:
     """
     Accepts:
-      - simple lines:   id, expression
-      - Batch CSV/TXT with headers; picks 'expression'/'expr'/'applicable_if'
+      - simple lines: id, expression
+      - Batch CSV/TXT with headers; uses 'expression'/'expr'.
+        Only uses 'applicable_if' if it contains non-boolean formulas.
     """
     lines = text.splitlines()
-    if not lines:
-        return []
-
-    header_like = ("," in lines[0]) and (("expression" in lines[0].lower()) or ("applicable" in lines[0].lower()))
+    if not lines: return []
+    hdr = lines[0].lower()
+    header_like = ("," in lines[0]) and (("expression" in hdr) or ("applicable" in hdr) or ("expr" in hdr))
     if header_like:
         df = pd.read_csv(io.StringIO(text))
-        # choose expression column
         expr_col = None
         for c in df.columns:
-            lc = c.lower()
-            if lc in ("expression", "expr"):
-                expr_col = c
-                break
+            if c.lower() in ("expression","expr"):
+                expr_col = c; break
         if expr_col is None:
             for c in df.columns:
                 if "applicable" in c.lower():
+                    vals = set(str(x).strip().lower() for x in df[c].dropna().unique().tolist())
+                    if not vals or vals.issubset(BOOLEAN_LITERALS):
+                        continue
                     expr_col = c
                     break
         if expr_col is None:
             return []
-
-        # choose id column or synthesize
         id_col = None
-        for cand in ("id", "filter_id", "name"):
-            if cand in df.columns:
-                id_col = cand
-                break
-        if id_col is None:
-            id_col = df.columns[0]
-
-        out: List[Tuple[str, str]] = []
-        for _, row in df.iterrows():
+        for cand in ("id","filter_id","name"):
+            if cand in df.columns: id_col = cand; break
+        if id_col is None: id_col = df.columns[0]
+        out=[]
+        for _,row in df.iterrows():
             fid = str(row[id_col])
             expr_raw = row[expr_col]
             expr = normalize_expression("" if pd.isna(expr_raw) else str(expr_raw))
-            if expr:
-                out.append((fid, expr))
+            if expr: out.append((fid, expr))
         return out
 
-    # fallback: id, expression lines
-    out: List[Tuple[str, str]] = []
+    # simple id,expression
+    out=[]
     for raw in lines:
         line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = [p.strip() for p in line.split(",", 1)]
-        if len(parts) == 2:
+        if not line or line.startswith("#"): continue
+        parts = [p.strip() for p in line.split(",",1)]
+        if len(parts)==2:
             fid, expr = parts[0], normalize_expression(parts[1])
-            if expr:
-                out.append((fid, expr))
+            if expr: out.append((fid, expr))
     return out
 
 # =======================
 # Evaluator
 # =======================
-def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
-             hot_cold_window: int, due_window: int, write_detailed: bool) -> Dict[str, pd.DataFrame]:
+def evaluate(draws: List[List[int]], filters: List[Tuple[str,str]],
+             hc_win: int, due_win: int, write_detailed: bool) -> Dict[str,pd.DataFrame]:
 
     variants = all_variants()
     summary_rows, flagged_rows, reverse_rows = [], [], []
-    detailed_rows: List[Dict[str, Any]] = []
+    detailed_rows: List[Dict[str,Any]] = []
 
     for fid, expr in filters:
         for v in variants:
-            eliminated = tested = 0
-            status = "OK"
-            explanation = layman_explanation(expr) if expr else "Unparseable"
-            last_error = ""
+            eliminated=tested=0
+            status="OK"; last_error=""
+            explanation = layman_explanation(expr)
 
-            for i in range(1, len(draws)):
-                seed_draw, win_draw = draws[i - 1], draws[i]
-                seed_val, win_val   = variant_value(seed_draw, v), variant_value(win_draw, v)
-                hot, cold, due      = compute_hot_cold_due(draws, i, v, hot_cold_window, due_window)
+            for i in range(1,len(draws)):
+                seed_draw, win_draw = draws[i-1], draws[i]
+                seed_val, win_val = variant_value(seed_draw, v), variant_value(win_draw, v)
+                hot, cold, due = compute_hot_cold_due(draws, i, v, hc_win, due_win)
 
-                # Base context for expressions
-                ctx: Dict[str, Any] = {
-                    "seed": seed_val, "winner": win_val,
-                    "hot": hot, "cold": cold, "due": due,
-                    "seed_draw": seed_draw, "winner_draw": win_draw,
-                    "variant_name": v,
-                }
-
-                # ---- Legacy-friendly aliases / lists / spreads ----
-                # lists of digits (winner & seed)
-                winner_ones = ones_digits_list(win_draw)
-                winner_tens = tens_digits_list(win_draw)
-                seed_ones   = ones_digits_list(seed_draw)
-                seed_tens   = tens_digits_list(seed_draw)
-
-                ctx.update({
-                    "ones_digits": winner_ones,          # legacy expressions expect this name
-                    "tens_digits": winner_tens,
-                    "seed_ones_digits": seed_ones,
-                    "seed_tens_digits": seed_tens,
-                    "sum_ones": sum(winner_ones),
-                    "sum_tens": sum(winner_tens),
-                    "seed_sum_ones": sum(seed_ones),
-                    "seed_sum_tens": sum(seed_tens),
+                ctx: Dict[str,Any] = {
+                    "seed":seed_val, "winner":win_val,
+                    "hot":hot, "cold":cold, "due":due,
+                    "seed_draw":seed_draw, "winner_draw":win_draw,
+                    "variant_name":v,
+                    # lists & sums for ones/tens
+                    "ones_digits": ones_digits_list(win_draw),
+                    "tens_digits": tens_digits_list(win_draw),
+                    "seed_ones_digits": ones_digits_list(seed_draw),
+                    "seed_tens_digits": tens_digits_list(seed_draw),
+                    "sum_ones": sum(ones_digits_list(win_draw)),
+                    "sum_tens": sum(tens_digits_list(win_draw)),
+                    "seed_sum_ones": sum(ones_digits_list(seed_draw)),
+                    "seed_sum_tens": sum(tens_digits_list(seed_draw)),
+                    # spreads
                     "seed_spread": spread_value(seed_draw),
                     "combo_spread": spread_value(win_draw),
-                })
+                    # full/ones/tens totals (aliases)
+                    "seed_full": variant_value(seed_draw,"full"),
+                    "winner_full": variant_value(win_draw,"full"),
+                    "seed_ones_total": variant_value(seed_draw,"ones"),
+                    "winner_ones_total": variant_value(win_draw,"ones"),
+                    "seed_tens_total": variant_value(seed_draw,"tens"),
+                    "winner_tens_total": variant_value(win_draw,"tens"),
+                    "combo_sum": variant_value(win_draw,"full"),
+                    "combo_total": variant_value(win_draw,"full"),
+                    "combo_ones_total": variant_value(win_draw,"ones"),
+                    "combo_tens_total": variant_value(win_draw,"tens"),
+                }
 
-                # full / ones / tens totals (aliases)
+                # positional numbers / tens / ones / digit-sums + short names
+                for j in range(1,6):
+                    wnum = variant_value(win_draw, f"pos{j}")
+                    snum = variant_value(seed_draw,f"pos{j}")
+                    wt, wo = wnum//10, wnum%10
+                    st, so = snum//10, snum%10
+                    wds, sds = wt+wo, st+so
+                    ctx[f"winner_pos{j}_number"]=wnum; ctx[f"seed_pos{j}_number"]=snum
+                    ctx[f"winner_pos{j}_tens"]=wt;   ctx[f"winner_pos{j}_ones"]=wo
+                    ctx[f"seed_pos{j}_tens"]=st;     ctx[f"seed_pos{j}_ones"]=so
+                    ctx[f"winner_pos{j}_digitsum"]=wds; ctx[f"seed_pos{j}_digitsum"]=sds
+                    ctx[f"pos{j}_number"]=wnum; ctx[f"pos{j}_tens"]=wt; ctx[f"pos{j}_ones"]=wo; ctx[f"pos{j}_digitsum"]=wds
+
                 ctx.update({
-                    "seed_full":               variant_value(seed_draw, "full"),
-                    "winner_full":             variant_value(win_draw,  "full"),
-                    "seed_ones_total":         variant_value(seed_draw, "ones"),
-                    "winner_ones_total":       variant_value(win_draw,  "ones"),
-                    "seed_tens_total":         variant_value(seed_draw, "tens"),
-                    "winner_tens_total":       variant_value(win_draw,  "tens"),
-                    "combo_sum":               variant_value(win_draw,  "full"),
-                    "combo_total":             variant_value(win_draw,  "full"),
-                    "combo_ones_total":        variant_value(win_draw,  "ones"),
-                    "combo_tens_total":        variant_value(win_draw,  "tens"),
-                })
-
-                # positional numbers / tens / ones / digit-sums
-                for j in range(1, 6):
-                    wnum = variant_value(win_draw,  f"pos{j}")
-                    snum = variant_value(seed_draw, f"pos{j}")
-                    wt, wo = (wnum // 10), (wnum % 10)
-                    st, so = (snum // 10), (snum % 10)
-                    wds = wt + wo
-                    sds = st + so
-
-                    ctx[f"winner_pos{j}_number"] = wnum
-                    ctx[f"seed_pos{j}_number"]   = snum
-
-                    ctx[f"winner_pos{j}_tens"]   = wt
-                    ctx[f"winner_pos{j}_ones"]   = wo
-                    ctx[f"seed_pos{j}_tens"]     = st
-                    ctx[f"seed_pos{j}_ones"]     = so
-
-                    ctx[f"winner_pos{j}_digitsum"] = wds
-                    ctx[f"seed_pos{j}_digitsum"]   = sds
-
-                    # common short legacy names (default to winner)
-                    ctx[f"pos{j}_number"]   = wnum
-                    ctx[f"pos{j}_tens"]     = wt
-                    ctx[f"pos{j}_ones"]     = wo
-                    ctx[f"pos{j}_digitsum"] = wds
-
-                # expose exact legacy spellings
-                ctx.update({
-                    "pos1_number": ctx["winner_pos1_number"],
-                    "pos2_number": ctx["winner_pos2_number"],
-                    "pos3_number": ctx["winner_pos3_number"],
-                    "pos4_number": ctx["winner_pos4_number"],
+                    "pos1_number": ctx["winner_pos1_number"], "pos2_number": ctx["winner_pos2_number"],
+                    "pos3_number": ctx["winner_pos3_number"], "pos4_number": ctx["winner_pos4_number"],
                     "pos5_number": ctx["winner_pos5_number"],
-                    "pos1_digitsum": ctx["winner_pos1_digitsum"],
-                    "pos2_digitsum": ctx["winner_pos2_digitsum"],
-                    "pos3_digitsum": ctx["winner_pos3_digitsum"],
-                    "pos4_digitsum": ctx["winner_pos4_digitsum"],
+                    "pos1_digitsum": ctx["winner_pos1_digitsum"], "pos2_digitsum": ctx["winner_pos2_digitsum"],
+                    "pos3_digitsum": ctx["winner_pos3_digitsum"], "pos4_digitsum": ctx["winner_pos4_digitsum"],
                     "pos5_digitsum": ctx["winner_pos5_digitsum"],
                 })
-                # ---- end aliases ----
 
-                keep = True
+                # ---- digits / mirrors / vtracs / structure / prev ----
+                def all_digits(draw):
+                    d = []
+                    for n in draw:
+                        d.extend([n // 10, n % 10])
+                    return d
+
+                combo_digits = all_digits(win_draw)
+                seed_digits  = all_digits(seed_draw)
+
+                # per-position seed digits (e.g., seed_digits_1 is [tens, ones] for pos1)
+                for j in range(1, 6):
+                    n = variant_value(seed_draw, f"pos{j}")
+                    ctx[f"seed_digits_{j}"] = [n // 10, n % 10]
+
+                # mirror map 0↔5, 1↔6, 2↔7, 3↔8, 4↔9
+                mirror = {0:5,1:6,2:7,3:8,4:9,5:0,6:1,7:2,8:3,9:4}
+
+                # vtracs (digit → digit % 5)
+                def vtrac(d): return d % 5
+                combo_vtracs = [vtrac(x) for x in combo_digits]
+                seed_vtracs  = [vtrac(x) for x in seed_digits]
+
+                # structures = count of unique digits (often compared to 5)
+                winner_structure = unique_digits_count(combo_digits)
+                seed_structure   = unique_digits_count(seed_digits)
+
+                # previous seed full sum (two steps back)
+                prev_seed_sum = full_sum(draws[i-2]) if i >= 2 else 0
+
+                # expose to expressions
+                ctx.update({
+                    "combo_digits": combo_digits,
+                    "seed_digits":  seed_digits,
+                    "combo_vtracs": combo_vtracs,
+                    "seed_vtracs":  seed_vtracs,
+                    "mirror":       mirror,
+                    "winner_structure": winner_structure,
+                    "seed_structure":   seed_structure,
+                    "prev_seed_sum":    prev_seed_sum,
+                })
+                # ---- end add-ons ----
+
+                keep=True
                 if not expr:
-                    status = "FLAGGED"
-                    last_error = "empty/normalized-away expression"
+                    status="FLAGGED"; last_error="empty/normalized-away expression"
                 else:
                     try:
                         # Convention: expression True => eliminate
                         keep = not bool(eval(expr, ALLOWED_GLOBALS, ctx))
                     except Exception as ex:
-                        status = "FLAGGED"
-                        last_error = f"{type(ex).__name__}: {ex}"
-                        keep = True
+                        status="FLAGGED"; last_error=f"{type(ex).__name__}: {ex}"; keep=True
 
-                eliminated += (0 if keep else 1)
-                tested += 1
+                eliminated += (0 if keep else 1); tested += 1
 
                 if write_detailed and len(detailed_rows) < MAX_DETAILED_ROWS:
                     detailed_rows.append({
-                        "filter_id": fid, "variant": v, "index": i,
-                        "seed_value": seed_val, "winner_value": win_val,
-                        "seed_draw": seed_draw, "winner_draw": win_draw,
-                        "hot_digits": hot, "cold_digits": cold, "due_digits": due,
-                        "eliminated": (not keep), "status": status,
-                        "error": last_error,
-                        "layman_explanation": explanation
+                        "filter_id":fid, "variant":v, "index":i,
+                        "seed_value":seed_val, "winner_value":win_val,
+                        "seed_draw":seed_draw, "winner_draw":win_draw,
+                        "hot_digits":hot, "cold_digits":cold, "due_digits":due,
+                        "eliminated":(not keep), "status":status, "error":last_error,
+                        "layman_explanation":explanation
                     })
 
-            stat = f"{eliminated}/{tested}"
-            summary_rows.append({
-                "filter_id": fid, "variant": v, "eliminated": eliminated,
-                "total": tested, "stat": stat, "status": status,
-                "layman_explanation": explanation
-            })
-            if status == "FLAGGED":
-                flagged_rows.append({
-                    "filter_id": fid, "variant": v, "stat": stat,
-                    "expression": expr, "error": last_error,
-                    "layman_explanation": explanation
-                })
-            if tested > 0 and (eliminated / tested) >= REVERSE_THRESHOLD:
-                reverse_rows.append({
-                    "filter_id": fid, "variant": v, "eliminated": eliminated,
-                    "total": tested, "stat": stat, "threshold": f"≥{int(REVERSE_THRESHOLD*100)}%",
-                    "layman_explanation": explanation
-                })
+            stat=f"{eliminated}/{tested}"
+            summary_rows.append({"filter_id":fid,"variant":v,"eliminated":eliminated,"total":tested,"stat":stat,"status":status,"layman_explanation":explanation})
+            if status=="FLAGGED":
+                flagged_rows.append({"filter_id":fid,"variant":v,"stat":stat,"expression":expr,"error":last_error,"layman_explanation":explanation})
+            if tested>0 and (eliminated/tested)>=REVERSE_THRESHOLD:
+                reverse_rows.append({"filter_id":fid,"variant":v,"eliminated":eliminated,"total":tested,"stat":stat,"threshold":f"≥{int(REVERSE_THRESHOLD*100)}%","layman_explanation":explanation})
 
     return {
         "summary": pd.DataFrame(summary_rows),
-        "flagged": pd.DataFrame(flagged_rows).drop_duplicates(subset=["filter_id", "variant"]),
-        "reverse": pd.DataFrame(reverse_rows).drop_duplicates(subset=["filter_id", "variant"]),
+        "flagged": pd.DataFrame(flagged_rows).drop_duplicates(subset=["filter_id","variant"]),
+        "reverse": pd.DataFrame(reverse_rows).drop_duplicates(subset=["filter_id","variant"]),
         "detailed": pd.DataFrame(detailed_rows) if write_detailed else pd.DataFrame(),
     }
 
 # =======================
 # Streamlit UI
 # =======================
-st.set_page_config(page_title=" Filter Runner", layout="wide")
-st.title("🎰 Filter Runner (variant → itself)")
+st.set_page_config(page_title="Powerball Filter Runner", layout="wide")
+st.title("🎰 Powerball Filter Runner (variant → itself)")
 
 with st.sidebar:
     st.header("Settings")
@@ -453,43 +399,33 @@ with st.sidebar:
 
     st.divider()
     st.caption("Upload files or leave blank to use repo files `pwrbll.txt` and `test 4pwrballfilters.txt`.")
-    up_draws   = st.file_uploader("Upload pwrbll.txt", type=["txt", "csv"])
-    up_filters = st.file_uploader("Upload filters (Batch CSV/TXT or id,expression)", type=["txt", "csv"])
+    up_draws   = st.file_uploader("Upload pwrbll.txt", type=["txt","csv"])
+    up_filters = st.file_uploader("Upload filters (Batch CSV/TXT or id,expression)", type=["txt","csv"])
 
 run_btn = st.button("▶️ Run filters")
 
 if run_btn:
     try:
-        # Load draws
         if up_draws is not None:
             draws_text = up_draws.read().decode("utf-8", errors="ignore")
         else:
-            with open("pwrbll.txt", encoding="utf-8") as f:
-                draws_text = f.read()
+            with open("pwrbll.txt", encoding="utf-8") as f: draws_text = f.read()
         draws = load_draws_from_text(draws_text, reverse_input=reverse_input)
         if len(draws) < 2:
-            st.error("Failed to parse at least 2 draws from pwrbll.txt.")
-            st.stop()
+            st.error("Failed to parse at least 2 draws from pwrbll.txt."); st.stop()
 
-        # Load filters
         if up_filters is not None:
             filters_text = up_filters.read().decode("utf-8", errors="ignore")
         else:
-            with open("test 4pwrballfilters.txt", encoding="utf-8") as f:
-                filters_text = f.read()
+            with open("test 4pwrballfilters.txt", encoding="utf-8") as f: filters_text = f.read()
         filters = load_filters_any(filters_text)
         if not filters:
-            st.error("No usable expressions found. Make sure there's an 'expression' column or id,expression lines.")
-            st.stop()
+            st.error("No usable expressions found. Ensure an 'expression'/'expr' column or id,expression lines (not just 'applicable_if=True')."); st.stop()
 
         st.success(f"Parsed {len(draws)} draws and {len(filters)} filters. Running…")
 
         dfs = evaluate(draws, filters, hot_cold_window, due_window, write_detailed)
-
-        summary_df  = dfs["summary"]
-        flagged_df  = dfs["flagged"]
-        reverse_df  = dfs["reverse"]
-        detailed_df = dfs["detailed"]
+        summary_df, flagged_df, reverse_df, detailed_df = dfs["summary"], dfs["flagged"], dfs["reverse"], dfs["detailed"]
 
         st.subheader("Results: Summary (per filter × variant)")
         st.dataframe(summary_df, use_container_width=True, height=400)
@@ -512,5 +448,4 @@ if run_btn:
         st.info(f"Done. Summary rows: {len(summary_df):,} | Flagged: {len(flagged_df):,} | Reverse: {len(reverse_df):,}")
 
     except Exception as e:
-        st.exception(e)
-        st.stop()
+        st.exception(e); st.stop()
