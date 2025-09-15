@@ -1,11 +1,11 @@
-# pwrbll_filter_app.py — Streamlit Filter Runner (variant → itself)
+# pwrbll_filter_app.py — Streamlit Powerball Filter Runner (variant → itself)
 
 from __future__ import annotations
 
-import io
 import re
+import io
 from collections import Counter
-from typing import Any, Dict, List, Tuple
+from typing import List, Tuple, Dict, Any
 
 import pandas as pd
 import streamlit as st
@@ -35,7 +35,7 @@ def load_draws_from_text(text: str, reverse_input: bool = False) -> List[List[in
     """
     Parse lines like:
       Sat, Aug 30, 2025   03-18-22-27-33,   Powerball: 17
-    → [[3,18,22,27,33], ...]
+    → [[3, 18, 22, 27, 33], ...]
     """
     draws: List[List[int]] = []
     pat = re.compile(r'(?<!\d)(\d{1,2})\D+(\d{1,2})\D+(\d{1,2})\D+(\d{1,2})\D+(\d{1,2})(?!\d)')
@@ -48,7 +48,7 @@ def load_draws_from_text(text: str, reverse_input: bool = False) -> List[List[in
     return draws
 
 # =======================
-# Variants (13)
+# Variants (13) + helpers
 # =======================
 def five_positions(draw: List[int]) -> List[int]:
     return list(draw)
@@ -79,7 +79,11 @@ def variant_value(draw: List[int], variant: str) -> Any:
     raise ValueError(f"Unknown variant {variant}")
 
 def all_variants() -> List[str]:
-    return ["full", "ones", "tens"] + [f"pos{i}" for i in range(1, 6)] + [f"possum{i}" for i in range(1, 6)]
+    return (
+        ["full", "ones", "tens"]
+        + [f"pos{i}" for i in range(1, 6)]
+        + [f"possum{i}" for i in range(1, 6)]
+    )
 
 # =======================
 # Hot / Cold / Due (variant-aware)
@@ -108,16 +112,17 @@ def atoms_for_hotcold(window_draws: List[List[int]], variant: str) -> List[int]:
     return a
 
 def compute_hot_cold_due(history: List[List[int]], idx: int, variant: str,
-                         hc_win: int, due_win: int) -> Tuple[List[int], List[int], List[int]]:
+                         hc_win: int, due_win: int):
     start = max(0, idx - hc_win)
     window = history[start:idx]
     cnt = Counter(atoms_for_hotcold(window, variant))
     if cnt:
         maxf, minf = max(cnt.values()), min(cnt.values())
-        hot = sorted([k for k, c in cnt.items() if c == maxf])
+        hot  = sorted([k for k, c in cnt.items() if c == maxf])
         cold = sorted([k for k, c in cnt.items() if c == minf])
     else:
         hot, cold = [], []
+
     recent = history[max(0, idx - due_win):idx]
     rdig: List[int] = []
     for d in recent:
@@ -127,27 +132,23 @@ def compute_hot_cold_due(history: List[List[int]], idx: int, variant: str,
     return hot, cold, due
 
 # =======================
-# Helpers available in expressions
+# Helpers exposed to expressions
 # =======================
 def spread_value(v) -> int:
     return (max(v) - min(v)) if isinstance(v, (list, tuple)) and len(v) == 5 else 0
 
 def unique_digits_count(v) -> int:
-    """
-    Robust: if v is a list of digits (0–9), count directly.
-    Otherwise, expand tens/ones of numbers and count unique digits.
-    """
+    digits = []
     if isinstance(v, (list, tuple)):
-        if all(isinstance(x, int) and 0 <= x <= 9 for x in v):
-            return len(set(v))
-        digits: List[int] = []
         for n in v:
             digits.extend([n // 10, n % 10])
-        return len(set(digits))
-    return len(set(int(ch) for ch in str(int(v))))
+    else:
+        for ch in str(int(v)):
+            digits.append(int(ch))
+    return len(set(digits))
 
 def is_triple_draw(v) -> bool:
-    digits: List[int] = []
+    digits = []
     if isinstance(v, (list, tuple)):
         for n in v:
             digits.extend([n // 10, n % 10])
@@ -164,7 +165,6 @@ def shared_digits_count(seed_draw: List[int], win_draw: List[int]) -> int:
         w.extend([n // 10, n % 10])
     return len(set(s) & set(w))
 
-# Give eval only what we allow:
 ALLOWED_GLOBALS = {
     "spread": spread_value,
     "unique_digits": unique_digits_count,
@@ -227,7 +227,8 @@ def normalize_expression(expr: str) -> str:
     if not e:
         return ""
     e = e.strip("\"'")
-    if "see prior" in e.lower() or "see conversation" in e.lower():
+    low = e.lower()
+    if "see prior" in low or "see conversation" in low:
         return ""
     for pat, repl in LEGACY_MAP:
         e = re.sub(pat, repl, e, flags=re.IGNORECASE)
@@ -240,15 +241,19 @@ def normalize_expression(expr: str) -> str:
 def load_filters_any(text: str) -> List[Tuple[str, str]]:
     """
     Accepts:
-      - simple lines: id, expression
+      - simple lines:  id, expression
       - Batch CSV/TXT with headers; uses 'expression'/'expr'.
         Only uses 'applicable_if' if it contains non-boolean formulas.
     """
     lines = text.splitlines()
     if not lines:
         return []
+
     hdr = lines[0].lower()
-    header_like = ("," in lines[0]) and (("expression" in hdr) or ("applicable" in hdr) or ("expr" in hdr))
+    header_like = ("," in lines[0]) and (
+        ("expression" in hdr) or ("applicable" in hdr) or ("expr" in hdr)
+    )
+
     if header_like:
         df = pd.read_csv(io.StringIO(text))
         expr_col = None
@@ -266,6 +271,7 @@ def load_filters_any(text: str) -> List[Tuple[str, str]]:
                     break
         if expr_col is None:
             return []
+
         id_col = None
         for cand in ("id", "filter_id", "name"):
             if cand in df.columns:
@@ -273,6 +279,7 @@ def load_filters_any(text: str) -> List[Tuple[str, str]]:
                 break
         if id_col is None:
             id_col = df.columns[0]
+
         out: List[Tuple[str, str]] = []
         for _, row in df.iterrows():
             fid = str(row[id_col])
@@ -320,7 +327,6 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                 seed_val, win_val = variant_value(seed_draw, v), variant_value(win_draw, v)
                 hot, cold, due = compute_hot_cold_due(draws, i, v, hc_win, due_win)
 
-                # base context
                 ctx: Dict[str, Any] = {
                     "seed": seed_val,
                     "winner": win_val,
@@ -330,10 +336,6 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                     "seed_draw": seed_draw,
                     "winner_draw": win_draw,
                     "variant_name": v,
-                    # hot/cold/due aliases used by some batches
-                    "hot_digits": hot,
-                    "cold_digits": cold,
-                    "due_digits": due,
                     # lists & sums for ones/tens
                     "ones_digits": ones_digits_list(win_draw),
                     "tens_digits": tens_digits_list(win_draw),
@@ -380,21 +382,17 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                     ctx[f"pos{j}_digitsum"] = wds
 
                 ctx.update({
-                    "pos1_number": ctx["winner_pos1_number"],
-                    "pos2_number": ctx["winner_pos2_number"],
-                    "pos3_number": ctx["winner_pos3_number"],
-                    "pos4_number": ctx["winner_pos4_number"],
+                    "pos1_number": ctx["winner_pos1_number"], "pos2_number": ctx["winner_pos2_number"],
+                    "pos3_number": ctx["winner_pos3_number"], "pos4_number": ctx["winner_pos4_number"],
                     "pos5_number": ctx["winner_pos5_number"],
-                    "pos1_digitsum": ctx["winner_pos1_digitsum"],
-                    "pos2_digitsum": ctx["winner_pos2_digitsum"],
-                    "pos3_digitsum": ctx["winner_pos3_digitsum"],
-                    "pos4_digitsum": ctx["winner_pos4_digitsum"],
+                    "pos1_digitsum": ctx["winner_pos1_digitsum"], "pos2_digitsum": ctx["winner_pos2_digitsum"],
+                    "pos3_digitsum": ctx["winner_pos3_digitsum"], "pos4_digitsum": ctx["winner_pos4_digitsum"],
                     "pos5_digitsum": ctx["winner_pos5_digitsum"],
                 })
 
                 # ---- digits / mirrors / vtracs / structure / prev ----
                 def all_digits(draw: List[int]) -> List[int]:
-                    d: List[int] = []
+                    d = []
                     for n in draw:
                         d.extend([n // 10, n % 10])
                     return d
@@ -411,10 +409,13 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                 mirror = {0: 5, 1: 6, 2: 7, 3: 8, 4: 9, 5: 0, 6: 1, 7: 2, 8: 3, 9: 4}
 
                 # vtracs (digit → digit % 5)
-                combo_vtracs = [x % 5 for x in combo_digits]
-                seed_vtracs = [x % 5 for x in seed_digits]
+                def vtrac(d: int) -> int:
+                    return d % 5
 
-                # structures = count of unique digits (0–9)
+                combo_vtracs = [vtrac(x) for x in combo_digits]
+                seed_vtracs = [vtrac(x) for x in seed_digits]
+
+                # structures = count of unique digits (often compared to 5)
                 winner_structure = unique_digits_count(combo_digits)
                 seed_structure = unique_digits_count(seed_digits)
 
@@ -430,7 +431,12 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                     "mirror": mirror,
                     "winner_structure": winner_structure,
                     "seed_structure": seed_structure,
+                    "combo_structure": winner_structure,  # alias used in some filters
                     "prev_seed_sum": prev_seed_sum,
+                    # hot/cold/due alias names expected by some filters
+                    "hot_digits": hot,
+                    "cold_digits": cold,
+                    "due_digits": due,
                 })
                 # ---- end add-ons ----
 
@@ -440,7 +446,7 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                     last_error = "empty/normalized-away expression"
                 else:
                     try:
-                        # Convention: expression True => eliminate
+                        # Convention: expression True => eliminate winner
                         keep = not bool(eval(expr, ALLOWED_GLOBALS, ctx))
                     except Exception as ex:
                         status = "FLAGGED"
@@ -508,26 +514,27 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
 # =======================
 # Streamlit UI
 # =======================
-st.set_page_config(page_title=" Filter Runner", layout="wide")
-st.title("🎰  Filter Runner (variant → itself)")
+st.set_page_config(page_title="Powerball Filter Runner", layout="wide")
+st.title("🎰 Powerball Filter Runner (variant → itself)")
 
 with st.sidebar:
     st.header("Settings")
-    reverse_input = st.checkbox("Input is newest → oldest (reverse to chronological)", value=True)
+    reverse_input   = st.checkbox("Input is newest → oldest (reverse to chronological)", value=True)
     hot_cold_window = st.number_input("Hot/Cold lookback (draws)", 1, 100, 6, 1)
-    due_window = st.number_input("Due lookback (draws)", 1, 20, 2, 1)
-    write_detailed = st.checkbox("Write detailed per-row results", value=False)
+    due_window      = st.number_input("Due lookback (draws)", 1, 20, 2, 1)
+    write_detailed  = st.checkbox("Write detailed per-row results", value=False)
     st.caption(f"(Detailed rows capped at {MAX_DETAILED_ROWS:,} to avoid OOM.)")
 
     st.divider()
     st.caption("Upload files or leave blank to use repo files `pwrbll.txt` and `test 4pwrballfilters.txt`.")
-    up_draws = st.file_uploader("Upload pwrbll.txt", type=["txt", "csv"])
+    up_draws   = st.file_uploader("Upload pwrbll.txt", type=["txt", "csv"])
     up_filters = st.file_uploader("Upload filters (Batch CSV/TXT or id,expression)", type=["txt", "csv"])
 
 run_btn = st.button("▶️ Run filters")
 
 if run_btn:
     try:
+        # Draws
         if up_draws is not None:
             draws_text = up_draws.read().decode("utf-8", errors="ignore")
         else:
@@ -538,6 +545,7 @@ if run_btn:
             st.error("Failed to parse at least 2 draws from pwrbll.txt.")
             st.stop()
 
+        # Filters
         if up_filters is not None:
             filters_text = up_filters.read().decode("utf-8", errors="ignore")
         else:
