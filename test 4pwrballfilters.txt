@@ -394,5 +394,6 @@ F728,"Eliminate If (abs(combo_sum - round((seed_sum**0.5) * 2.0, 2)) <= 2)",True
 F729,"NO Eliminate If (abs(combo_sum - round((seed_sum**0.5) * 2.5, 2)) <= 2)",True,"True","""(abs(combo_sum - round((seed_sum**0.5) * 2.5, 2)) <= 2)""",,,,,,,,,,
 F730,"Eliminate If (abs(combo_sum - round((seed_sum**0.5) * 3.0, 2)) <= 2)",True,"True","""(abs(combo_sum - round((seed_sum**0.5) * 3.0, 2)) <= 2)""",,,,,,,,,,
 F724C,"Eliminate If (seed root/3 is integer & in combo)",True,"True","""(((seed_sum % 9 or 9) % 3 == 0) and (((seed_sum % 9 or 9) // 3) in combo_digits))""",,,,,,,,,,
-
 NEWF725,"Eliminate IF combo has neither 5,8 nor 5", True, "True","""5 not in combo_digits and 8 not in combo_digits and 5 not in combo_digits""",,,,,,,,,, 
+CTX_SMOKE, (len(seed_digits)>=0) and (len(combo_digits)>=0) and (mirror[0]==5)
+
