@@ -1,4 +1,4 @@
-# pwrbll_filter_app.py — Streamlit Filter Runner (variant → itself)
+# pwrbll_filter_app.py — Streamlit Powerball Filter Runner (variant → itself)
 
 from __future__ import annotations
 
@@ -201,6 +201,7 @@ LEGACY_MAP = [
     (r"\bcombo_sum\b", "winner"),
     (r"\bcombo_total\b", "winner"),
     (r"\bcombo\b", "winner"),
+    (r"\bcombo_structure\b", "winner_structure"),  # alias fix
     (r"\bseed_sum\b", "seed"),
     (r"\bseed_total\b", "seed"),
     (r"\bones_total\b", "winner"),
@@ -330,11 +331,8 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                 ctx: Dict[str, Any] = {
                     "seed": seed_val,
                     "winner": win_val,
-                    "hot": hot,
-                    "cold": cold,
-                    "due": due,
-                    "seed_draw": seed_draw,
-                    "winner_draw": win_draw,
+                    "hot": hot, "cold": cold, "due": due,
+                    "seed_draw": seed_draw, "winner_draw": win_draw,
                     "variant_name": v,
                     # lists & sums for ones/tens
                     "ones_digits": ones_digits_list(win_draw),
@@ -398,9 +396,9 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                     return d
 
                 combo_digits = all_digits(win_draw)
-                seed_digits = all_digits(seed_draw)
+                seed_digits  = all_digits(seed_draw)
 
-                # per-position seed digits (e.g., seed_digits_1 is [tens, ones] for pos1)
+                # per-position seed digits (e.g., seed_digits_1 .. seed_digits_5)
                 for j in range(1, 6):
                     n = variant_value(seed_draw, f"pos{j}")
                     ctx[f"seed_digits_{j}"] = [n // 10, n % 10]
@@ -409,15 +407,13 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                 mirror = {0: 5, 1: 6, 2: 7, 3: 8, 4: 9, 5: 0, 6: 1, 7: 2, 8: 3, 9: 4}
 
                 # vtracs (digit → digit % 5)
-                def vtrac(d: int) -> int:
-                    return d % 5
-
+                def vtrac(d: int) -> int: return d % 5
                 combo_vtracs = [vtrac(x) for x in combo_digits]
-                seed_vtracs = [vtrac(x) for x in seed_digits]
+                seed_vtracs  = [vtrac(x) for x in seed_digits]
 
                 # structures = count of unique digits (often compared to 5)
                 winner_structure = unique_digits_count(combo_digits)
-                seed_structure = unique_digits_count(seed_digits)
+                seed_structure   = unique_digits_count(seed_digits)
 
                 # previous seed full sum (two steps back)
                 prev_seed_sum = full_sum(draws[i - 2]) if i >= 2 else 0
@@ -427,16 +423,16 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                     "combo_digits": combo_digits,
                     "seed_digits": seed_digits,
                     "combo_vtracs": combo_vtracs,
-                    "seed_vtracs": seed_vtracs,
-                    "mirror": mirror,
+                    "seed_vtracs":  seed_vtracs,
+                    "mirror":       mirror,
                     "winner_structure": winner_structure,
-                    "seed_structure": seed_structure,
-                    "combo_structure": winner_structure,  # alias used in some filters
-                    "prev_seed_sum": prev_seed_sum,
-                    # hot/cold/due alias names expected by some filters
-                    "hot_digits": hot,
+                    "seed_structure":   seed_structure,
+                    "combo_structure":  winner_structure,   # legacy alias
+                    "prev_seed_sum":    prev_seed_sum,
+                    # keep these exact names for filters
+                    "hot_digits":  hot,
                     "cold_digits": cold,
-                    "due_digits": due,
+                    "due_digits":  due,
                 })
                 # ---- end add-ons ----
 
@@ -458,48 +454,30 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
 
                 if write_detailed and len(detailed_rows) < MAX_DETAILED_ROWS:
                     detailed_rows.append({
-                        "filter_id": fid,
-                        "variant": v,
-                        "index": i,
-                        "seed_value": seed_val,
-                        "winner_value": win_val,
-                        "seed_draw": seed_draw,
-                        "winner_draw": win_draw,
-                        "hot_digits": hot,
-                        "cold_digits": cold,
-                        "due_digits": due,
-                        "eliminated": (not keep),
-                        "status": status,
-                        "error": last_error,
+                        "filter_id": fid, "variant": v, "index": i,
+                        "seed_value": seed_val, "winner_value": win_val,
+                        "seed_draw": seed_draw, "winner_draw": win_draw,
+                        "hot_digits": hot, "cold_digits": cold, "due_digits": due,
+                        "eliminated": (not keep), "status": status, "error": last_error,
                         "layman_explanation": explanation,
                     })
 
             stat = f"{eliminated}/{tested}"
             summary_rows.append({
-                "filter_id": fid,
-                "variant": v,
-                "eliminated": eliminated,
-                "total": tested,
-                "stat": stat,
-                "status": status,
+                "filter_id": fid, "variant": v, "eliminated": eliminated,
+                "total": tested, "stat": stat, "status": status,
                 "layman_explanation": explanation,
             })
             if status == "FLAGGED":
                 flagged_rows.append({
-                    "filter_id": fid,
-                    "variant": v,
-                    "stat": stat,
-                    "expression": expr,
-                    "error": last_error,
+                    "filter_id": fid, "variant": v, "stat": stat,
+                    "expression": expr, "error": last_error,
                     "layman_explanation": explanation,
                 })
             if tested > 0 and (eliminated / tested) >= REVERSE_THRESHOLD:
                 reverse_rows.append({
-                    "filter_id": fid,
-                    "variant": v,
-                    "eliminated": eliminated,
-                    "total": tested,
-                    "stat": stat,
+                    "filter_id": fid, "variant": v, "eliminated": eliminated,
+                    "total": tested, "stat": stat,
                     "threshold": f"≥{int(REVERSE_THRESHOLD * 100)}%",
                     "layman_explanation": explanation,
                 })
@@ -514,8 +492,8 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
 # =======================
 # Streamlit UI
 # =======================
-st.set_page_config(page_title="Filter Runner", layout="wide")
-st.title("🎰 Filter Runner (variant → itself)")
+st.set_page_config(page_title="Powerball Filter Runner", layout="wide")
+st.title("🎰 Powerball Filter Runner (variant → itself)")
 
 with st.sidebar:
     st.header("Settings")
