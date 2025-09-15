@@ -1,4 +1,4 @@
-# pwrbll_filter_app.py — Streamlit Filter Runner (variant → itself)
+# pwrbll_filter_app.py — Streamlit Filter Runner (variant → itself) with session persistence
 
 from __future__ import annotations
 
@@ -19,14 +19,27 @@ MAX_DETAILED_ROWS = 200_000
 # =======================
 # UI helper
 # =======================
-def download_pair(df: pd.DataFrame, base: str) -> None:
+def download_pair(df: pd.DataFrame, base: str, key_prefix: str = "") -> None:
+    """Show CSV & TXT download buttons for a dataframe (keys so multiple buttons won’t collide)."""
     csv_bytes = df.to_csv(index=False).encode("utf-8")
     txt_bytes = df.to_csv(index=False, sep="\t").encode("utf-8")
     c1, c2 = st.columns(2)
     with c1:
-        st.download_button(f"⬇️ Download {base}.csv", csv_bytes, f"{base}.csv", "text/csv")
+        st.download_button(
+            f"⬇️ Download {base}.csv",
+            csv_bytes,
+            f"{base}.csv",
+            "text/csv",
+            key=f"{key_prefix}_{base}_csv",
+        )
     with c2:
-        st.download_button(f"⬇️ Download {base}.txt", txt_bytes, f"{base}.txt", "text/plain")
+        st.download_button(
+            f"⬇️ Download {base}.txt",
+            txt_bytes,
+            f"{base}.txt",
+            "text/plain",
+            key=f"{key_prefix}_{base}_txt",
+        )
 
 # =======================
 # Robust draw loader
@@ -401,8 +414,13 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                 })
 
                 # ---- digits / mirrors / vtracs / structure / prev / last2 ----
-                combo_digits = all_digits(win_draw)
-                seed_digits  = all_digits(seed_draw)
+                combo_digits = []
+                for n in win_draw:
+                    combo_digits.extend([n // 10, n % 10])
+                seed_digits = []
+                for n in seed_draw:
+                    seed_digits.extend([n // 10, n % 10])
+
                 mirror = {0: 5, 1: 6, 2: 7, 3: 8, 4: 9, 5: 0, 6: 1, 7: 2, 8: 3, 9: 4}
                 def vtrac(d: int) -> int: return d % 5
                 combo_vtracs = [vtrac(x) for x in combo_digits]
@@ -410,9 +428,12 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                 winner_structure = unique_digits_count(combo_digits)
                 seed_structure   = unique_digits_count(seed_digits)
                 prev_seed_sum = full_sum(draws[i - 2]) if i >= 2 else 0
-                # digits seen in the last 2 prior draws
                 if i >= 2:
-                    last2_digits = list(set(all_digits(draws[i-1]) + all_digits(draws[i-2])))
+                    # digits from last two prior draws
+                    last2_digits = list(set(
+                        [x for n in draws[i-1] for x in (n//10, n%10)] +
+                        [x for n in draws[i-2] for x in (n//10, n%10)]
+                    ))
                 else:
                     last2_digits = []
 
@@ -496,6 +517,12 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
 st.set_page_config(page_title="Filter Runner", layout="wide")
 st.title("🎰 Filter Runner (variant → itself)")
 
+# init session slots
+if "results" not in st.session_state:
+    st.session_state["results"] = None
+if "meta" not in st.session_state:
+    st.session_state["meta"] = {}
+
 with st.sidebar:
     st.header("Settings")
     reverse_input   = st.checkbox("Input is newest → oldest (reverse to chronological)", value=True)
@@ -538,28 +565,51 @@ if run_btn:
         st.success(f"Parsed {len(draws)} draws and {len(filters)} filters. Running…")
 
         dfs = evaluate(draws, filters, hot_cold_window, due_window, write_detailed)
-        summary_df, flagged_df, reverse_df, detailed_df = dfs["summary"], dfs["flagged"], dfs["reverse"], dfs["detailed"]
-
-        st.subheader("Results: Summary (per filter × variant)")
-        st.dataframe(summary_df, use_container_width=True, height=400)
-        download_pair(summary_df, "filter_results")
-
-        st.subheader("Flagged Filters (with error messages)")
-        st.dataframe(flagged_df, use_container_width=True, height=260)
-        download_pair(flagged_df, "flagged_filters")
-
-        st.subheader("Reversal Candidates (≥ 75% eliminated)")
-        st.dataframe(reverse_df, use_container_width=True, height=260)
-        download_pair(reverse_df, "reversal_candidates")
-
-        if write_detailed and not detailed_df.empty:
-            st.subheader("Detailed (per row tested)")
-            st.caption(f"Showing first 50,000 rows (of {len(detailed_df):,}).")
-            st.dataframe(detailed_df.head(50_000), use_container_width=True, height=320)
-            download_pair(detailed_df, "filter_results_detailed")
-
-        st.info(f"Done. Summary rows: {len(summary_df):,} | Flagged: {len(flagged_df):,} | Reverse: {len(reverse_df):,}")
+        # persist results so downloads survive reruns
+        st.session_state["results"] = dfs
+        st.session_state["meta"] = {
+            "hot_cold_window": hot_cold_window,
+            "due_window": due_window,
+            "write_detailed": write_detailed,
+            "reverse_input": reverse_input,
+            "n_draws": len(draws),
+            "n_filters": len(filters),
+        }
 
     except Exception as e:
         st.exception(e)
         st.stop()
+
+# ---- Render from session (survives reruns triggered by downloads) ----
+dfs = st.session_state.get("results")
+meta = st.session_state.get("meta")
+
+if dfs is not None:
+    summary_df, flagged_df, reverse_df, detailed_df = (
+        dfs["summary"], dfs["flagged"], dfs["reverse"], dfs["detailed"]
+    )
+
+    st.subheader("Results: Summary (per filter × variant)")
+    st.dataframe(summary_df, use_container_width=True, height=400)
+    download_pair(summary_df, "filter_results", key_prefix="summary")
+
+    st.subheader("Flagged Filters (with error messages)")
+    st.dataframe(flagged_df, use_container_width=True, height=260)
+    download_pair(flagged_df, "flagged_filters", key_prefix="flagged")
+
+    st.subheader("Reversal Candidates (≥ 75% eliminated)")
+    st.dataframe(reverse_df, use_container_width=True, height=260)
+    download_pair(reverse_df, "reversal_candidates", key_prefix="reverse")
+
+    if meta.get("write_detailed") and not detailed_df.empty:
+        st.subheader("Detailed (per row tested)")
+        st.caption(f"Showing first 50,000 rows (of {len(detailed_df):,}).")
+        st.dataframe(detailed_df.head(50_000), use_container_width=True, height=320)
+        download_pair(detailed_df, "filter_results_detailed", key_prefix="detailed")
+
+    st.info(
+        f"Done. Summary rows: {len(summary_df):,} | "
+        f"Flagged: {len(flagged_df):,} | Reverse: {len(reverse_df):,}"
+    )
+else:
+    st.caption("⬆️ Configure settings and click **Run filters** to generate results.")
