@@ -1,5 +1,4 @@
 # pwrbll_filter_app.py — Streamlit Filter Runner (variant → itself)
-# Build 2025-09-14 ctxfix-v4
 
 from __future__ import annotations
 
@@ -16,7 +15,6 @@ import streamlit as st
 # =======================
 REVERSE_THRESHOLD = 0.75
 MAX_DETAILED_ROWS = 200_000
-APP_BUILD = "Build 2025-09-14 ctxfix-v4"
 
 # =======================
 # UI helper
@@ -200,17 +198,15 @@ def layman_explanation(expr: str) -> str:
 # Legacy token normalization
 # =======================
 LEGACY_MAP = [
-    # common aliases
-    (r"\bcombo_sum\b", "winner"),
+    (r"\bcombo_sum\b", "winner"),    # kept for safety, but we now also expose combo_sum explicitly
     (r"\bcombo_total\b", "winner"),
     (r"\bcombo\b", "winner"),
     (r"\bcombo_structure\b", "winner_structure"),
-    (r"\bseed_sum\b", "seed"),
+    (r"\bseed_sum\b", "seed"),       # kept for safety, but we now also expose seed_sum explicitly
     (r"\bseed_total\b", "seed"),
     (r"\bones_total\b", "winner"),
     (r"\btens_total\b", "winner"),
     (r"\bfull_combo\b", "winner"),
-    # human words & symbols
     (r"\b&\b", " and "),
     (r"\b\|\b", " or "),
     (r"“|”|‘|’", "\""),
@@ -218,12 +214,6 @@ LEGACY_MAP = [
     (r"≥", ">="),
     (r"≠", "!="),
     (r"–", "-"),
-    (r"\bprior\b", "seed"),
-    (r"\bprevious\b", "seed"),
-    # positional shorthands like "pos1 ones", "pos1 tens", "pos1 sum"
-    (r"\bpos(\d)\s+ones\b",  r"winner_pos\1_ones"),
-    (r"\bpos(\d)\s+tens\b",  r"winner_pos\1_tens"),
-    (r"\bpos(\d)\s+(?:sum|digitsum|digit[-_\s]?sum)\b", r"winner_pos\1_digitsum"),
 ]
 
 BOOLEAN_LITERALS = {"true", "false", "1", "0", "yes", "no"}
@@ -253,8 +243,8 @@ def load_filters_any(text: str) -> List[Tuple[str, str]]:
     """
     Accepts:
       - simple lines:  id, expression
-      - Batch CSV/TXT with headers; uses 'expression'/'expr'.
-        Only uses 'applicable_if' if it contains non-boolean formulas.
+      - Batch CSV/TXT with headers: uses 'expression'/'expr' or, if those are boolean
+        literals, falls back to 'applicable_if' when it contains a real formula.
     """
     lines = text.splitlines()
     if not lines:
@@ -267,22 +257,7 @@ def load_filters_any(text: str) -> List[Tuple[str, str]]:
 
     if header_like:
         df = pd.read_csv(io.StringIO(text))
-        expr_col = None
-        for c in df.columns:
-            if c.lower() in ("expression", "expr"):
-                expr_col = c
-                break
-        if expr_col is None:
-            for c in df.columns:
-                if "applicable" in c.lower():
-                    vals = set(str(x).strip().lower() for x in df[c].dropna().unique().tolist())
-                    if not vals or vals.issubset(BOOLEAN_LITERALS):
-                        continue
-                    expr_col = c
-                    break
-        if expr_col is None:
-            return []
-
+        # Find columns
         id_col = None
         for cand in ("id", "filter_id", "name"):
             if cand in df.columns:
@@ -291,13 +266,30 @@ def load_filters_any(text: str) -> List[Tuple[str, str]]:
         if id_col is None:
             id_col = df.columns[0]
 
+        expr_name = None
+        for c in df.columns:
+            if c.lower() in ("expression", "expr"):
+                expr_name = c
+                break
+        app_name = None
+        for c in df.columns:
+            if "applicable" in c.lower():
+                app_name = c
+                break
+
         out: List[Tuple[str, str]] = []
         for _, row in df.iterrows():
             fid = str(row[id_col])
-            expr_raw = row[expr_col]
-            expr = normalize_expression("" if pd.isna(expr_raw) else str(expr_raw))
-            if expr:
-                out.append((fid, expr))
+            raw_expr = str(row[expr_name]) if (expr_name in df.columns) else ""
+            raw_app  = str(row[app_name])  if (app_name  in df.columns) else ""
+
+            expr = normalize_expression("" if raw_expr is None or raw_expr == "nan" else raw_expr)
+            app  = normalize_expression("" if raw_app  is None or raw_app  == "nan" else raw_app)
+
+            # If the expression normalized away (boolean / empty) but applicable_if has a real formula, use it.
+            use = expr if expr else app
+            if use:
+                out.append((fid, use))
         return out
 
     # simple id,expression
@@ -338,9 +330,15 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                 seed_val, win_val = variant_value(seed_draw, v), variant_value(win_draw, v)
                 hot, cold, due = compute_hot_cold_due(draws, i, v, hc_win, due_win)
 
+                # ---- basic numbers and aliases ----
+                seed_full_sum   = variant_value(seed_draw, "full")
+                winner_full_sum = variant_value(win_draw, "full")
+
                 ctx: Dict[str, Any] = {
                     "seed": seed_val,
                     "winner": win_val,
+                    "seed_sum": seed_full_sum,         # explicit alias (do not rely on 'seed')
+                    "combo_sum": winner_full_sum,      # explicit alias
                     "hot": hot, "cold": cold, "due": due,
                     "seed_draw": seed_draw, "winner_draw": win_draw,
                     "variant_name": v,
@@ -357,14 +355,13 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                     "seed_spread": spread_value(seed_draw),
                     "combo_spread": spread_value(win_draw),
                     # full/ones/tens totals (aliases)
-                    "seed_full": variant_value(seed_draw, "full"),
-                    "winner_full": variant_value(win_draw, "full"),
+                    "seed_full": seed_full_sum,
+                    "winner_full": winner_full_sum,
                     "seed_ones_total": variant_value(seed_draw, "ones"),
                     "winner_ones_total": variant_value(win_draw, "ones"),
                     "seed_tens_total": variant_value(seed_draw, "tens"),
                     "winner_tens_total": variant_value(win_draw, "tens"),
-                    "combo_sum": variant_value(win_draw, "full"),
-                    "combo_total": variant_value(win_draw, "full"),
+                    "combo_total": winner_full_sum,
                     "combo_ones_total": variant_value(win_draw, "ones"),
                     "combo_tens_total": variant_value(win_draw, "tens"),
                 }
@@ -407,45 +404,62 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
 
                 combo_digits = all_digits(win_draw)
                 seed_digits  = all_digits(seed_draw)
+                ctx["combo_digits"] = combo_digits
+                ctx["seed_digits"]  = seed_digits
 
-                # per-position seed digits (e.g., seed_digits_1 .. seed_digits_5)
+                # counts and structures
+                ctx["seed_counts"]   = Counter(seed_digits)
+                winner_structure     = unique_digits_count(combo_digits)
+                seed_structure       = unique_digits_count(seed_digits)
+                ctx["winner_structure"] = winner_structure
+                ctx["seed_structure"]   = seed_structure
+                ctx["combo_structure"]  = winner_structure  # legacy alias some filters use
+
+                # seed digit pairs per position
                 for j in range(1, 6):
                     n = variant_value(seed_draw, f"pos{j}")
                     ctx[f"seed_digits_{j}"] = [n // 10, n % 10]
 
                 # mirror map 0↔5, 1↔6, 2↔7, 3↔8, 4↔9
                 mirror = {0: 5, 1: 6, 2: 7, 3: 8, 4: 9, 5: 0, 6: 1, 7: 2, 8: 3, 9: 4}
+                ctx["mirror"] = mirror
 
                 # vtracs (digit → digit % 5)
                 def vtrac(d: int) -> int: return d % 5
-                combo_vtracs = [vtrac(x) for x in combo_digits]
-                seed_vtracs  = [vtrac(x) for x in seed_digits]
+                ctx["combo_vtracs"] = [vtrac(x) for x in combo_digits]
+                ctx["seed_vtracs"]  = [vtrac(x) for x in seed_digits]
 
-                # structures = count of unique digits
-                winner_structure = unique_digits_count(combo_digits)
-                seed_structure   = unique_digits_count(seed_digits)
-
-                # previous seed full sum (two steps back)
+                # previous seed (two steps back too)
                 prev_seed_sum = full_sum(draws[i - 2]) if i >= 2 else 0
+                ctx["prev_seed_sum"] = prev_seed_sum
 
-                # expose to expressions
-                ctx.update({
-                    "combo_digits": combo_digits,
-                    "seed_digits": seed_digits,
-                    "combo_vtracs": combo_vtracs,
-                    "seed_vtracs":  seed_vtracs,
-                    "mirror":       mirror,
-                    "winner_structure": winner_structure,
-                    "seed_structure":   seed_structure,
-                    "combo_structure":  winner_structure,   # legacy alias
-                    "prev_seed_sum":    prev_seed_sum,
-                    # keep these exact names for filters
-                    "hot_digits":  hot,
-                    "cold_digits": cold,
-                    "due_digits":  due,
-                })
-                # ---- end add-ons ----
+                if i >= 2:
+                    prev_seed_digits = all_digits(draws[i - 2])
+                else:
+                    prev_seed_digits = []
+                ctx["prev_seed_digits"] = prev_seed_digits
 
+                # last two draws combined and their overlap
+                if i >= 2:
+                    last2_digits = set(seed_digits) | set(prev_seed_digits)
+                    both_prev_overlap = set(seed_digits) & set(prev_seed_digits)
+                else:
+                    last2_digits = set(seed_digits)
+                    both_prev_overlap = set()
+
+                ctx["last2"] = last2_digits
+                ctx["common_to_both"] = both_prev_overlap
+
+                # new seed digits vs previous seed
+                new_seed_digits = set(seed_digits) - set(prev_seed_digits)
+                ctx["new_seed_digits"] = new_seed_digits
+
+                # keep original hot/cold/due names many filters use
+                ctx["hot_digits"]  = hot
+                ctx["cold_digits"] = cold
+                ctx["due_digits"]  = due
+
+                # ---- evaluate expression ----
                 keep = True
                 if not expr:
                     status = "FLAGGED"
@@ -504,7 +518,6 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
 # =======================
 st.set_page_config(page_title="Filter Runner", layout="wide")
 st.title("🎰 Filter Runner (variant → itself)")
-st.caption(APP_BUILD)
 
 with st.sidebar:
     st.header("Settings")
@@ -518,9 +531,6 @@ with st.sidebar:
     st.caption("Upload files or leave blank to use repo files `pwrbll.txt` and `test 4pwrballfilters.txt`.")
     up_draws   = st.file_uploader("Upload pwrbll.txt", type=["txt", "csv"])
     up_filters = st.file_uploader("Upload filters (Batch CSV/TXT or id,expression)", type=["txt", "csv"])
-
-    # Optional debug: show the keys available to expressions for row 1 / variant 'full'
-    show_debug_ctx = st.checkbox("Show first-row context keys (debug)", value=False)
 
 run_btn = st.button("▶️ Run filters")
 
@@ -545,38 +555,8 @@ if run_btn:
                 filters_text = f.read()
         filters = load_filters_any(filters_text)
         if not filters:
-            st.error("No usable expressions found. Ensure an 'expression'/'expr' column or id,expression lines (not just 'applicable_if=True').")
+            st.error("No usable expressions found. If `expression` is just True/False, the app now falls back to `applicable_if` automatically.")
             st.stop()
-
-        # Optional debug: show available keys for the first evaluable row
-        if show_debug_ctx and len(draws) > 1:
-            seed_draw, win_draw = draws[0], draws[1]
-            v = "full"
-            hot, cold, due = compute_hot_cold_due(draws, 1, v, hot_cold_window, due_window)
-            # Minimal ctx preview (same shape as inside evaluate)
-            preview_ctx = {
-                "seed": variant_value(seed_draw, v),
-                "winner": variant_value(win_draw, v),
-                "seed_draw": seed_draw,
-                "winner_draw": win_draw,
-            }
-            # Add the full ctx keys exactly like evaluate()
-            ones = ones_digits_list(win_draw); tens = tens_digits_list(win_draw)
-            s_ones = ones_digits_list(seed_draw); s_tens = tens_digits_list(seed_draw)
-            preview_ctx.update({
-                "ones_digits": ones, "tens_digits": tens,
-                "seed_ones_digits": s_ones, "seed_tens_digits": s_tens,
-                "seed_spread": spread_value(seed_draw), "combo_spread": spread_value(win_draw),
-            })
-            # important extra keys:
-            def all_digits(draw): 
-                d=[] 
-                for n in draw: d.extend([n//10, n%10]) 
-                return d
-            preview_ctx["combo_digits"] = all_digits(win_draw)
-            preview_ctx["seed_digits"] = all_digits(seed_draw)
-            preview_ctx["mirror"] = {0:5,1:6,2:7,3:8,4:9,5:0,6:1,7:2,8:3,9:4}
-            st.write("Context keys:", sorted(list(preview_ctx.keys())))
 
         st.success(f"Parsed {len(draws)} draws and {len(filters)} filters. Running…")
 
