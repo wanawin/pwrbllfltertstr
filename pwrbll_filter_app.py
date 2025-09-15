@@ -1,4 +1,5 @@
 # pwrbll_filter_app.py — Streamlit Filter Runner (variant → itself)
+# Build 2025-09-14 ctxfix-v4
 
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ import streamlit as st
 # =======================
 REVERSE_THRESHOLD = 0.75
 MAX_DETAILED_ROWS = 200_000
+APP_BUILD = "Build 2025-09-14 ctxfix-v4"
 
 # =======================
 # UI helper
@@ -198,15 +200,17 @@ def layman_explanation(expr: str) -> str:
 # Legacy token normalization
 # =======================
 LEGACY_MAP = [
+    # common aliases
     (r"\bcombo_sum\b", "winner"),
     (r"\bcombo_total\b", "winner"),
     (r"\bcombo\b", "winner"),
-    (r"\bcombo_structure\b", "winner_structure"),  # alias fix
+    (r"\bcombo_structure\b", "winner_structure"),
     (r"\bseed_sum\b", "seed"),
     (r"\bseed_total\b", "seed"),
     (r"\bones_total\b", "winner"),
     (r"\btens_total\b", "winner"),
     (r"\bfull_combo\b", "winner"),
+    # human words & symbols
     (r"\b&\b", " and "),
     (r"\b\|\b", " or "),
     (r"“|”|‘|’", "\""),
@@ -214,6 +218,12 @@ LEGACY_MAP = [
     (r"≥", ">="),
     (r"≠", "!="),
     (r"–", "-"),
+    (r"\bprior\b", "seed"),
+    (r"\bprevious\b", "seed"),
+    # positional shorthands like "pos1 ones", "pos1 tens", "pos1 sum"
+    (r"\bpos(\d)\s+ones\b",  r"winner_pos\1_ones"),
+    (r"\bpos(\d)\s+tens\b",  r"winner_pos\1_tens"),
+    (r"\bpos(\d)\s+(?:sum|digitsum|digit[-_\s]?sum)\b", r"winner_pos\1_digitsum"),
 ]
 
 BOOLEAN_LITERALS = {"true", "false", "1", "0", "yes", "no"}
@@ -411,7 +421,7 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                 combo_vtracs = [vtrac(x) for x in combo_digits]
                 seed_vtracs  = [vtrac(x) for x in seed_digits]
 
-                # structures = count of unique digits (often compared to 5)
+                # structures = count of unique digits
                 winner_structure = unique_digits_count(combo_digits)
                 seed_structure   = unique_digits_count(seed_digits)
 
@@ -494,6 +504,7 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
 # =======================
 st.set_page_config(page_title="Filter Runner", layout="wide")
 st.title("🎰 Filter Runner (variant → itself)")
+st.caption(APP_BUILD)
 
 with st.sidebar:
     st.header("Settings")
@@ -507,6 +518,9 @@ with st.sidebar:
     st.caption("Upload files or leave blank to use repo files `pwrbll.txt` and `test 4pwrballfilters.txt`.")
     up_draws   = st.file_uploader("Upload pwrbll.txt", type=["txt", "csv"])
     up_filters = st.file_uploader("Upload filters (Batch CSV/TXT or id,expression)", type=["txt", "csv"])
+
+    # Optional debug: show the keys available to expressions for row 1 / variant 'full'
+    show_debug_ctx = st.checkbox("Show first-row context keys (debug)", value=False)
 
 run_btn = st.button("▶️ Run filters")
 
@@ -533,6 +547,36 @@ if run_btn:
         if not filters:
             st.error("No usable expressions found. Ensure an 'expression'/'expr' column or id,expression lines (not just 'applicable_if=True').")
             st.stop()
+
+        # Optional debug: show available keys for the first evaluable row
+        if show_debug_ctx and len(draws) > 1:
+            seed_draw, win_draw = draws[0], draws[1]
+            v = "full"
+            hot, cold, due = compute_hot_cold_due(draws, 1, v, hot_cold_window, due_window)
+            # Minimal ctx preview (same shape as inside evaluate)
+            preview_ctx = {
+                "seed": variant_value(seed_draw, v),
+                "winner": variant_value(win_draw, v),
+                "seed_draw": seed_draw,
+                "winner_draw": win_draw,
+            }
+            # Add the full ctx keys exactly like evaluate()
+            ones = ones_digits_list(win_draw); tens = tens_digits_list(win_draw)
+            s_ones = ones_digits_list(seed_draw); s_tens = tens_digits_list(seed_draw)
+            preview_ctx.update({
+                "ones_digits": ones, "tens_digits": tens,
+                "seed_ones_digits": s_ones, "seed_tens_digits": s_tens,
+                "seed_spread": spread_value(seed_draw), "combo_spread": spread_value(win_draw),
+            })
+            # important extra keys:
+            def all_digits(draw): 
+                d=[] 
+                for n in draw: d.extend([n//10, n%10]) 
+                return d
+            preview_ctx["combo_digits"] = all_digits(win_draw)
+            preview_ctx["seed_digits"] = all_digits(seed_draw)
+            preview_ctx["mirror"] = {0:5,1:6,2:7,3:8,4:9,5:0,6:1,7:2,8:3,9:4}
+            st.write("Context keys:", sorted(list(preview_ctx.keys())))
 
         st.success(f"Parsed {len(draws)} draws and {len(filters)} filters. Running…")
 
