@@ -1,5 +1,4 @@
-# pwrbll_filter_app.py — Streamlit Filter Runner (variant → itself) with session persistence
-
+# pwrbll_filter_app.py — Streamlit Filter Runner (variant → itself)
 from __future__ import annotations
 
 import re
@@ -19,27 +18,14 @@ MAX_DETAILED_ROWS = 200_000
 # =======================
 # UI helper
 # =======================
-def download_pair(df: pd.DataFrame, base: str, key_prefix: str = "") -> None:
-    """Show CSV & TXT download buttons for a dataframe (keys so multiple buttons won’t collide)."""
+def download_pair(df: pd.DataFrame, base: str) -> None:
     csv_bytes = df.to_csv(index=False).encode("utf-8")
     txt_bytes = df.to_csv(index=False, sep="\t").encode("utf-8")
     c1, c2 = st.columns(2)
     with c1:
-        st.download_button(
-            f"⬇️ Download {base}.csv",
-            csv_bytes,
-            f"{base}.csv",
-            "text/csv",
-            key=f"{key_prefix}_{base}_csv",
-        )
+        st.download_button(f"⬇️ Download {base}.csv", csv_bytes, f"{base}.csv", "text/csv")
     with c2:
-        st.download_button(
-            f"⬇️ Download {base}.txt",
-            txt_bytes,
-            f"{base}.txt",
-            "text/plain",
-            key=f"{key_prefix}_{base}_txt",
-        )
+        st.download_button(f"⬇️ Download {base}.txt", txt_bytes, f"{base}.txt", "text/plain")
 
 # =======================
 # Robust draw loader
@@ -178,16 +164,11 @@ def shared_digits_count(seed_draw: List[int], win_draw: List[int]) -> int:
         w.extend([n // 10, n % 10])
     return len(set(s) & set(w))
 
-def common_to_both(a, b):
-    """Return the intersection of two iterables as a list (order not guaranteed)."""
-    return list(set(a) & set(b))
-
 ALLOWED_GLOBALS = {
     "spread": spread_value,
     "unique_digits": unique_digits_count,
     "is_triple": is_triple_draw,
     "shared_digits": shared_digits_count,
-    "common_to_both": common_to_both,
     "min": min, "max": max, "abs": abs, "sum": sum, "len": len,
     "set": set, "any": any, "all": all, "sorted": sorted, "range": range,
     "Counter": Counter,
@@ -333,12 +314,6 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
     reverse_rows: List[Dict[str, Any]] = []
     detailed_rows: List[Dict[str, Any]] = []
 
-    def all_digits(draw: List[int]) -> List[int]:
-        d = []
-        for n in draw:
-            d.extend([n // 10, n % 10])
-        return d
-
     for fid, expr in filters:
         for v in variants:
             eliminated = 0
@@ -352,7 +327,6 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                 seed_val, win_val = variant_value(seed_draw, v), variant_value(win_draw, v)
                 hot, cold, due = compute_hot_cold_due(draws, i, v, hc_win, due_win)
 
-                # base context
                 ctx: Dict[str, Any] = {
                     "seed": seed_val,
                     "winner": win_val,
@@ -413,41 +387,47 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                     "pos5_digitsum": ctx["winner_pos5_digitsum"],
                 })
 
-                # ---- digits / mirrors / vtracs / structure / prev / last2 ----
-                combo_digits = []
-                for n in win_draw:
-                    combo_digits.extend([n // 10, n % 10])
-                seed_digits = []
-                for n in seed_draw:
-                    seed_digits.extend([n // 10, n % 10])
+                # ---- digits / mirrors / vtracs / structure / prev ----
+                def all_digits(draw: List[int]) -> List[int]:
+                    d = []
+                    for n in draw:
+                        d.extend([n // 10, n % 10])
+                    return d
 
+                combo_digits = all_digits(win_draw)
+                seed_digits  = all_digits(seed_draw)
+
+                # per-position seed digits (e.g., seed_digits_1 .. seed_digits_5)
+                for j in range(1, 6):
+                    n = variant_value(seed_draw, f"pos{j}")
+                    ctx[f"seed_digits_{j}"] = [n // 10, n % 10]
+
+                # mirror map 0↔5, 1↔6, 2↔7, 3↔8, 4↔9
                 mirror = {0: 5, 1: 6, 2: 7, 3: 8, 4: 9, 5: 0, 6: 1, 7: 2, 8: 3, 9: 4}
+
+                # vtracs (digit → digit % 5)
                 def vtrac(d: int) -> int: return d % 5
                 combo_vtracs = [vtrac(x) for x in combo_digits]
                 seed_vtracs  = [vtrac(x) for x in seed_digits]
+
+                # structures = count of unique digits (often compared to 5)
                 winner_structure = unique_digits_count(combo_digits)
                 seed_structure   = unique_digits_count(seed_digits)
-                prev_seed_sum = full_sum(draws[i - 2]) if i >= 2 else 0
-                if i >= 2:
-                    # digits from last two prior draws
-                    last2_digits = list(set(
-                        [x for n in draws[i-1] for x in (n//10, n%10)] +
-                        [x for n in draws[i-2] for x in (n//10, n%10)]
-                    ))
-                else:
-                    last2_digits = []
 
+                # previous seed full sum (two steps back)
+                prev_seed_sum = full_sum(draws[i - 2]) if i >= 2 else 0
+
+                # expose to expressions
                 ctx.update({
                     "combo_digits": combo_digits,
                     "seed_digits": seed_digits,
                     "combo_vtracs": combo_vtracs,
                     "seed_vtracs":  seed_vtracs,
-                    "mirror": mirror,
+                    "mirror":       mirror,
                     "winner_structure": winner_structure,
                     "seed_structure":   seed_structure,
                     "combo_structure":  winner_structure,   # legacy alias
                     "prev_seed_sum":    prev_seed_sum,
-                    "last2":            last2_digits,
                     # keep these exact names for filters
                     "hot_digits":  hot,
                     "cold_digits": cold,
@@ -461,11 +441,8 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                     last_error = "empty/normalized-away expression"
                 else:
                     try:
-                        # IMPORTANT: merge ctx into globals so comprehensions see vars
-                        G = dict(ALLOWED_GLOBALS)
-                        G.update(ctx)
                         # Convention: expression True => eliminate winner
-                        keep = not bool(eval(expr, G, {}))
+                        keep = not bool(eval(expr, ALLOWED_GLOBALS, ctx))
                     except Exception as ex:
                         status = "FLAGGED"
                         last_error = f"{type(ex).__name__}: {ex}"
@@ -486,8 +463,13 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
 
             stat = f"{eliminated}/{tested}"
             summary_rows.append({
-                "filter_id": fid, "variant": v, "eliminated": eliminated,
-                "total": tested, "stat": stat, "status": status,
+                "filter_id": fid,
+                "variant": v,
+                "expression": expr,            # <—— include executable expression
+                "eliminated": eliminated,
+                "total": tested,
+                "stat": stat,
+                "status": status,
                 "layman_explanation": explanation,
             })
             if status == "FLAGGED":
@@ -498,8 +480,12 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
                 })
             if tested > 0 and (eliminated / tested) >= REVERSE_THRESHOLD:
                 reverse_rows.append({
-                    "filter_id": fid, "variant": v, "eliminated": eliminated,
-                    "total": tested, "stat": stat,
+                    "filter_id": fid,
+                    "variant": v,
+                    "expression": expr,        # <—— include executable expression
+                    "eliminated": eliminated,
+                    "total": tested,
+                    "stat": stat,
                     "threshold": f"≥{int(REVERSE_THRESHOLD * 100)}%",
                     "layman_explanation": explanation,
                 })
@@ -517,17 +503,12 @@ def evaluate(draws: List[List[int]], filters: List[Tuple[str, str]],
 st.set_page_config(page_title="Filter Runner", layout="wide")
 st.title("🎰 Filter Runner (variant → itself)")
 
-# init session slots
-if "results" not in st.session_state:
-    st.session_state["results"] = None
-if "meta" not in st.session_state:
-    st.session_state["meta"] = {}
-
 with st.sidebar:
     st.header("Settings")
     reverse_input   = st.checkbox("Input is newest → oldest (reverse to chronological)", value=True)
     hot_cold_window = st.number_input("Hot/Cold lookback (draws)", 1, 100, 6, 1)
     due_window      = st.number_input("Due lookback (draws)", 1, 20, 2, 1)
+    keeper_threshold = st.slider("Keeper max elimination rate", 0.00, 0.50, 0.25, 0.01)  # NEW
     write_detailed  = st.checkbox("Write detailed per-row results", value=False)
     st.caption(f"(Detailed rows capped at {MAX_DETAILED_ROWS:,} to avoid OOM.)")
 
@@ -565,51 +546,45 @@ if run_btn:
         st.success(f"Parsed {len(draws)} draws and {len(filters)} filters. Running…")
 
         dfs = evaluate(draws, filters, hot_cold_window, due_window, write_detailed)
-        # persist results so downloads survive reruns
-        st.session_state["results"] = dfs
-        st.session_state["meta"] = {
-            "hot_cold_window": hot_cold_window,
-            "due_window": due_window,
-            "write_detailed": write_detailed,
-            "reverse_input": reverse_input,
-            "n_draws": len(draws),
-            "n_filters": len(filters),
-        }
+        summary_df, flagged_df, reverse_df, detailed_df = dfs["summary"], dfs["flagged"], dfs["reverse"], dfs["detailed"]
+
+        # ---- Keepers (≤ threshold) ----
+        st.subheader("Keepers (≤ threshold eliminated)")
+        if not summary_df.empty:
+            summary_df = summary_df.copy()
+            summary_df["elim_rate"] = summary_df["eliminated"] / summary_df["total"]
+            keepers_df = summary_df[
+                (summary_df["status"] == "OK") & (summary_df["elim_rate"] <= keeper_threshold)
+            ][["filter_id","variant","expression","layman_explanation","eliminated","total","stat","elim_rate"]].reset_index(drop=True)
+        else:
+            keepers_df = pd.DataFrame(columns=["filter_id","variant","expression","layman_explanation","eliminated","total","stat","elim_rate"])
+        st.dataframe(keepers_df, use_container_width=True, height=260)
+        download_pair(keepers_df, "keepers")
+
+        # ---- Summary ----
+        st.subheader("Results: Summary (per filter × variant)")
+        st.dataframe(summary_df, use_container_width=True, height=400)
+        download_pair(summary_df, "filter_results")
+
+        # ---- Flagged ----
+        st.subheader("Flagged Filters (with error messages)")
+        st.dataframe(flagged_df, use_container_width=True, height=260)
+        download_pair(flagged_df, "flagged_filters")
+
+        # ---- Reversal candidates ----
+        st.subheader("Reversal Candidates (≥ 75% eliminated)")
+        st.dataframe(reverse_df, use_container_width=True, height=260)
+        download_pair(reverse_df, "reversal_candidates")
+
+        # ---- Detailed ----
+        if write_detailed and not detailed_df.empty:
+            st.subheader("Detailed (per row tested)")
+            st.caption(f"Showing first 50,000 rows (of {len(detailed_df):,}).")
+            st.dataframe(detailed_df.head(50_000), use_container_width=True, height=320)
+            download_pair(detailed_df, "filter_results_detailed")
+
+        st.info(f"Done. Summary rows: {len(summary_df):,} | Keepers: {len(keepers_df):,} | Flagged: {len(flagged_df):,} | Reverse: {len(reverse_df):,}")
 
     except Exception as e:
         st.exception(e)
         st.stop()
-
-# ---- Render from session (survives reruns triggered by downloads) ----
-dfs = st.session_state.get("results")
-meta = st.session_state.get("meta")
-
-if dfs is not None:
-    summary_df, flagged_df, reverse_df, detailed_df = (
-        dfs["summary"], dfs["flagged"], dfs["reverse"], dfs["detailed"]
-    )
-
-    st.subheader("Results: Summary (per filter × variant)")
-    st.dataframe(summary_df, use_container_width=True, height=400)
-    download_pair(summary_df, "filter_results", key_prefix="summary")
-
-    st.subheader("Flagged Filters (with error messages)")
-    st.dataframe(flagged_df, use_container_width=True, height=260)
-    download_pair(flagged_df, "flagged_filters", key_prefix="flagged")
-
-    st.subheader("Reversal Candidates (≥ 75% eliminated)")
-    st.dataframe(reverse_df, use_container_width=True, height=260)
-    download_pair(reverse_df, "reversal_candidates", key_prefix="reverse")
-
-    if meta.get("write_detailed") and not detailed_df.empty:
-        st.subheader("Detailed (per row tested)")
-        st.caption(f"Showing first 50,000 rows (of {len(detailed_df):,}).")
-        st.dataframe(detailed_df.head(50_000), use_container_width=True, height=320)
-        download_pair(detailed_df, "filter_results_detailed", key_prefix="detailed")
-
-    st.info(
-        f"Done. Summary rows: {len(summary_df):,} | "
-        f"Flagged: {len(flagged_df):,} | Reverse: {len(reverse_df):,}"
-    )
-else:
-    st.caption("⬆️ Configure settings and click **Run filters** to generate results.")
