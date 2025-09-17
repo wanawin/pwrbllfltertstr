@@ -1,4 +1,4 @@
-# pwrbll_filter_app.py — Streamlit Filter Runner (variant → itself)
+
 from __future__ import annotations
 
 import hashlib
